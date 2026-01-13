@@ -11,6 +11,7 @@ cmd_stop() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -s|--service)
+                [[ -z "${2:-}" ]] && { log_error "Option $1 requires an argument"; return 1; }
                 service="$2"
                 shift 2
                 ;;
@@ -19,6 +20,7 @@ cmd_stop() {
                 shift
                 ;;
             -p|--project)
+                [[ -z "${2:-}" ]] && { log_error "Option $1 requires an argument"; return 1; }
                 project="$2"
                 shift 2
                 ;;

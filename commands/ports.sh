@@ -14,6 +14,7 @@ cmd_ports() {
                 shift
                 ;;
             -p|--project)
+                [[ -z "${2:-}" ]] && { log_error "Option $1 requires an argument"; return 1; }
                 project="$2"
                 shift 2
                 ;;

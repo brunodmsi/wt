@@ -10,10 +10,12 @@ cmd_init() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -t|--template)
+                [[ -z "${2:-}" ]] && { log_error "Option $1 requires an argument"; return 1; }
                 template="$2"
                 shift 2
                 ;;
             -n|--name)
+                [[ -z "${2:-}" ]] && { log_error "Option $1 requires an argument"; return 1; }
                 project_name="$2"
                 shift 2
                 ;;

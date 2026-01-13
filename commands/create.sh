@@ -11,6 +11,7 @@ cmd_create() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --from)
+                [[ -z "${2:-}" ]] && { log_error "Option $1 requires an argument"; return 1; }
                 base_branch="$2"
                 shift 2
                 ;;
@@ -19,6 +20,7 @@ cmd_create() {
                 shift
                 ;;
             -p|--project)
+                [[ -z "${2:-}" ]] && { log_error "Option $1 requires an argument"; return 1; }
                 project="$2"
                 shift 2
                 ;;

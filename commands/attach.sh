@@ -10,10 +10,12 @@ cmd_attach() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -w|--window)
+                [[ -z "${2:-}" ]] && { log_error "Option $1 requires an argument"; return 1; }
                 window="$2"
                 shift 2
                 ;;
             -p|--project)
+                [[ -z "${2:-}" ]] && { log_error "Option $1 requires an argument"; return 1; }
                 project="$2"
                 shift 2
                 ;;

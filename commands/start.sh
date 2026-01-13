@@ -12,6 +12,10 @@ cmd_start() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -s|--service)
+                if [[ -z "${2:-}" ]]; then
+                    log_error "Option $1 requires an argument"
+                    return 1
+                fi
                 service="$2"
                 shift 2
                 ;;
@@ -24,6 +28,10 @@ cmd_start() {
                 shift
                 ;;
             -p|--project)
+                if [[ -z "${2:-}" ]]; then
+                    log_error "Option $1 requires an argument"
+                    return 1
+                fi
                 project="$2"
                 shift 2
                 ;;
