@@ -40,10 +40,15 @@ cmd_stop() {
         esac
     done
 
+    # If no branch specified, try to detect from current directory
     if [[ -z "$branch" ]]; then
-        log_error "Branch name is required"
-        show_stop_help
-        return 1
+        branch=$(detect_worktree_branch)
+        if [[ -z "$branch" ]]; then
+            log_error "Branch name is required"
+            show_stop_help
+            return 1
+        fi
+        log_info "Detected worktree branch: $branch"
     fi
 
     # Detect or validate project

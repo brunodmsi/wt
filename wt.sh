@@ -43,8 +43,7 @@ source "${WT_SCRIPT_DIR}/commands/ports.sh"
 
 # Show help
 show_help() {
-    cat << EOF
-${BOLD}wt${NC} - Git Worktree Manager v${VERSION}
+    echo -e "${BOLD}wt${NC} - Git Worktree Manager v${VERSION}
 
 ${BOLD}USAGE${NC}
     wt <command> [arguments] [options]
@@ -102,8 +101,7 @@ ${BOLD}CONFIGURATION${NC}
 
 For more information on a command, run:
     wt <command> --help
-
-EOF
+"
 }
 
 # Show version

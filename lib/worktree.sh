@@ -239,3 +239,48 @@ get_worktree_branches() {
 
     git -C "$repo_root" worktree list --porcelain | grep "^branch " | sed 's/branch refs\/heads\///'
 }
+
+# Detect if we're inside a worktree and return its branch name
+detect_worktree_branch() {
+    local current_dir
+    current_dir=$(pwd)
+
+    # Check if we're in a .worktrees directory
+    if [[ "$current_dir" == *"/.worktrees/"* ]]; then
+        # Extract the worktree name from the path
+        local wt_part="${current_dir#*/.worktrees/}"
+        local wt_name="${wt_part%%/*}"
+
+        # Find the actual branch name from git worktree list
+        local repo_root="${current_dir%/.worktrees/*}"
+        local branch
+        branch=$(git -C "$repo_root" worktree list --porcelain 2>/dev/null | awk -v wt="$repo_root/.worktrees/$wt_name" '
+            /^worktree / { current_wt = substr($0, 10) }
+            /^branch / && current_wt == wt { print substr($0, 19); exit }
+        ')
+
+        if [[ -n "$branch" ]]; then
+            echo "$branch"
+            return 0
+        fi
+    fi
+
+    # Try using git to detect if in a worktree
+    if git rev-parse --is-inside-work-tree &>/dev/null; then
+        local toplevel
+        toplevel=$(git rev-parse --show-toplevel 2>/dev/null)
+
+        if [[ "$toplevel" == *"/.worktrees/"* ]]; then
+            # We're in a worktree, get the branch
+            local branch
+            branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+            if [[ -n "$branch" ]] && [[ "$branch" != "HEAD" ]]; then
+                echo "$branch"
+                return 0
+            fi
+        fi
+    fi
+
+    echo ""
+    return 0
+}

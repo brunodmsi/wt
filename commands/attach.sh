@@ -35,10 +35,15 @@ cmd_attach() {
         esac
     done
 
+    # If no branch specified, try to detect from current directory
     if [[ -z "$branch" ]]; then
-        log_error "Branch name is required"
-        show_attach_help
-        return 1
+        branch=$(detect_worktree_branch)
+        if [[ -z "$branch" ]]; then
+            log_error "Branch name is required"
+            show_attach_help
+            return 1
+        fi
+        log_info "Detected worktree branch: $branch"
     fi
 
     # Detect or validate project
@@ -52,25 +57,28 @@ cmd_attach() {
     # Load project configuration
     load_project_config "$project"
 
-    # Get session name
-    local session
-    session=$(get_session_name "$project" "$branch")
+    # Get window name (sanitized branch)
+    local window_name
+    window_name=$(get_session_name "$project" "$branch")
 
-    # Check if session exists
-    if ! session_exists "$session"; then
-        # Try to create it if worktree exists
+    # Get tmux session name from config
+    local tmux_session
+    tmux_session=$(get_tmux_session_name "$PROJECT_CONFIG_FILE")
+
+    # Check if window exists, create if needed
+    if ! session_exists "$tmux_session" || ! window_exists "$tmux_session" "$window_name"; then
         if worktree_exists "$branch" "$PROJECT_REPO_PATH"; then
-            log_info "Session not found, creating..."
+            log_info "Window not found, creating..."
             local wt_path
             wt_path=$(get_worktree_path "$project" "$branch")
-            create_session "$session" "$wt_path" "$PROJECT_CONFIG_FILE"
+            create_session "$window_name" "$wt_path" "$PROJECT_CONFIG_FILE"
         else
-            die "No worktree or session found for branch: $branch"
+            die "No worktree found for branch: $branch"
         fi
     fi
 
-    # Attach
-    attach_session "$session" "$window"
+    # Attach to session and select window
+    attach_session "$window_name" "$PROJECT_CONFIG_FILE"
 }
 
 show_attach_help() {

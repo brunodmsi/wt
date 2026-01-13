@@ -142,6 +142,12 @@ detect_project() {
 
     local repo_root
     repo_root=$(git_root 2>/dev/null) || { echo ""; return 0; }
+
+    # If we're inside a worktree, get the main repo path
+    if [[ "$repo_root" == *"/.worktrees/"* ]]; then
+        repo_root="${repo_root%/.worktrees/*}"
+    fi
+
     local project_name
     project_name=$(basename "$repo_root")
 

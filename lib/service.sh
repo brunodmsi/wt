@@ -1,6 +1,28 @@
 #!/bin/bash
 # lib/service.sh - Service lifecycle management
 
+# Find the pane index for a service in the config
+find_service_pane_index() {
+    local config_file="$1"
+    local service_name="$2"
+
+    local pane_count
+    pane_count=$(yaml_array_length "$config_file" ".tmux.windows[0].panes")
+
+    for ((p = 0; p < pane_count; p++)); do
+        local pane_service
+        pane_service=$(yq -r ".tmux.windows[0].panes[$p].service // \"\"" "$config_file" 2>/dev/null)
+
+        if [[ "$pane_service" == "$service_name" ]]; then
+            echo "$p"
+            return 0
+        fi
+    done
+
+    echo ""
+    return 1
+}
+
 # Start a service
 start_service() {
     local project="$1"
@@ -73,28 +95,27 @@ start_service() {
         eval "$cmd" 2>/dev/null || true
     done <<< "$pre_start"
 
-    # Get tmux session
-    local session
-    session=$(get_session_name "$project" "$branch")
+    # Get tmux session and window
+    local tmux_session
+    tmux_session=$(get_tmux_session_name "$config_file")
+    local window_name
+    window_name=$(get_session_name "$project" "$branch")
 
     local exec_dir="$worktree_path/$svc_dir"
 
     log_info "Starting $service_name on port $port..."
 
-    # Find or create pane for service
-    local pane_target
-    pane_target=$(find_service_pane "$session" "$service_name" "$config_file")
+    # Find pane for this service within the worktree window
+    local pane_idx
+    pane_idx=$(find_service_pane_index "$config_file" "$service_name")
 
-    if [[ -n "$pane_target" ]]; then
-        # Send command to existing pane
-        local window="${pane_target%%:*}"
-        local pane="${pane_target##*:}"
-
-        tmux send-keys -t "${session}:${window}.${pane}" "cd '$exec_dir' && PORT=$port $svc_cmd" Enter
+    if [[ -n "$pane_idx" ]]; then
+        # Send command to the service pane
+        tmux send-keys -t "${tmux_session}:${window_name}.${pane_idx}" "cd '$exec_dir' && PORT=$port $svc_cmd" Enter
     else
-        # Create new window for service
-        create_service_window "$session" "$service_name" "$exec_dir"
-        tmux send-keys -t "${session}:${service_name}" "PORT=$port $svc_cmd" Enter
+        # No pane configured, create a new window for the service
+        tmux new-window -t "$tmux_session" -n "${window_name}-${service_name}" -c "$exec_dir"
+        tmux send-keys -t "${tmux_session}:${window_name}-${service_name}" "PORT=$port $svc_cmd" Enter
     fi
 
     # Update state (we don't have PID directly since it's in tmux)
@@ -121,22 +142,23 @@ stop_service() {
 
     log_info "Stopping $service_name..."
 
-    # Get tmux session
-    local session
-    session=$(get_session_name "$project" "$branch")
+    # Get tmux session and window names
+    local tmux_session
+    tmux_session=$(get_tmux_session_name "$config_file")
+    local window_name
+    window_name=$(get_session_name "$project" "$branch")
 
-    # Try to find and interrupt the service pane
-    local pane_target
-    pane_target=$(find_service_pane "$session" "$service_name" "$config_file")
+    # Find pane for this service within the worktree window
+    local pane_idx
+    pane_idx=$(find_service_pane_index "$config_file" "$service_name")
 
-    if [[ -n "$pane_target" ]]; then
-        local window="${pane_target%%:*}"
-        local pane="${pane_target##*:}"
-        interrupt_pane "$session" "${window}.${pane}"
+    if [[ -n "$pane_idx" ]]; then
+        # Interrupt the service pane
+        interrupt_pane "$tmux_session" "${window_name}.${pane_idx}"
     else
-        # Try service-named window
-        if tmux list-windows -t "$session" -F "#{window_name}" 2>/dev/null | grep -q "^${service_name}$"; then
-            interrupt_pane "$session" "$service_name"
+        # Try service-named window (fallback for services started without pane config)
+        if tmux list-windows -t "$tmux_session" -F "#{window_name}" 2>/dev/null | grep -q "^${window_name}-${service_name}$"; then
+            interrupt_pane "$tmux_session" "${window_name}-${service_name}"
         fi
     fi
 

@@ -76,10 +76,10 @@ cmd_delete() {
     log_info "Stopping services..."
     stop_all_services "$project" "$branch" "$PROJECT_CONFIG_FILE" 2>/dev/null || true
 
-    # Kill tmux session
-    local session
-    session=$(get_session_name "$project" "$branch")
-    kill_session "$session"
+    # Kill tmux window
+    local window_name
+    window_name=$(get_session_name "$project" "$branch")
+    kill_session "$window_name" "$PROJECT_CONFIG_FILE"
 
     # Run pre_delete hook if defined
     local pre_delete

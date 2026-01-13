@@ -253,15 +253,13 @@ cleanup_stale_services() {
     done < <(list_service_states "$project" "$branch")
 }
 
-# Get tmux session name for a worktree
+# Get tmux window name for a worktree (just the sanitized branch name)
 get_session_name() {
     local project="$1"
     local branch="$2"
 
-    local sanitized
-    sanitized=$(sanitize_branch_name "$branch")
-
-    echo "wt-${project}-${sanitized}"
+    # Window name is just the sanitized branch name
+    sanitize_branch_name "$branch"
 }
 
 # Store tmux session in state

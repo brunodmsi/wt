@@ -102,13 +102,13 @@ cmd_create() {
         log_info "Skipping setup (--no-setup)"
     fi
 
-    # Create tmux session
+    # Create tmux window in the main session
     echo ""
-    local session
-    session=$(get_session_name "$project" "$branch")
+    local window_name
+    window_name=$(get_session_name "$project" "$branch")
 
-    create_session "$session" "$wt_path" "$PROJECT_CONFIG_FILE"
-    set_session_state "$project" "$branch" "$session"
+    create_session "$window_name" "$wt_path" "$PROJECT_CONFIG_FILE"
+    set_session_state "$project" "$branch" "$window_name"
 
     # Run post_create hook if defined
     local post_create
@@ -122,14 +122,16 @@ cmd_create() {
     echo ""
     log_success "Worktree ready!"
     echo ""
+    local tmux_session
+    tmux_session=$(get_tmux_session_name "$PROJECT_CONFIG_FILE")
     print_kv "Branch" "$branch"
     print_kv "Path" "$wt_path"
     print_kv "Slot" "$slot"
-    print_kv "tmux session" "$session"
+    print_kv "tmux" "$tmux_session:$window_name"
     echo ""
     echo "Next steps:"
     echo "  wt start $branch --all    # Start all services"
-    echo "  wt attach $branch         # Attach to tmux session"
+    echo "  wt attach $branch         # Attach to tmux"
 }
 
 show_create_help() {
