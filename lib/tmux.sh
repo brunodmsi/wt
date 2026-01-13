@@ -177,6 +177,18 @@ configure_window_panes() {
             fi
             tmux send-keys -t "${session}:${window}.${p}" "# Service: $pane_service (use 'wt start' to run)" Enter
         elif [[ -n "$pane_cmd" ]] && [[ "$pane_cmd" != "null" ]] && [[ "$pane_cmd" != "" ]]; then
+            # Get optional working_dir for command pane, default to worktree root
+            local cmd_working_dir
+            cmd_working_dir=$(echo "$pane_config" | yq -r '.working_dir // ""' 2>/dev/null)
+
+            # CD to working directory (or root if not specified)
+            if [[ -n "$root_dir" ]]; then
+                if [[ -n "$cmd_working_dir" ]] && [[ "$cmd_working_dir" != "null" ]] && [[ "$cmd_working_dir" != "." ]]; then
+                    tmux send-keys -t "${session}:${window}.${p}" "cd '$root_dir/$cmd_working_dir'" Enter
+                else
+                    tmux send-keys -t "${session}:${window}.${p}" "cd '$root_dir'" Enter
+                fi
+            fi
             tmux send-keys -t "${session}:${window}.${p}" "$pane_cmd" Enter
         fi
     done
@@ -319,6 +331,18 @@ setup_services_top_layout() {
             fi
             tmux send-keys -t "${session}:${window}.${p}" "# Service: $pane_service (use 'wt start' to run)" Enter
         elif [[ -n "$pane_cmd" ]] && [[ "$pane_cmd" != "null" ]] && [[ "$pane_cmd" != "" ]]; then
+            # Get optional working_dir for command pane, default to worktree root
+            local cmd_working_dir
+            cmd_working_dir=$(echo "$pane_config" | yq -r '.working_dir // ""' 2>/dev/null)
+
+            # CD to working directory (or root if not specified)
+            if [[ -n "$root_dir" ]]; then
+                if [[ -n "$cmd_working_dir" ]] && [[ "$cmd_working_dir" != "null" ]] && [[ "$cmd_working_dir" != "." ]]; then
+                    tmux send-keys -t "${session}:${window}.${p}" "cd '$root_dir/$cmd_working_dir'" Enter
+                else
+                    tmux send-keys -t "${session}:${window}.${p}" "cd '$root_dir'" Enter
+                fi
+            fi
             tmux send-keys -t "${session}:${window}.${p}" "$pane_cmd" Enter
         fi
     done
@@ -364,6 +388,18 @@ configure_panes() {
             fi
             tmux send-keys -t "${session}:${window}.${p}" "# Service: $pane_service (use 'wt start' to run)" Enter
         elif [[ -n "$pane_cmd" ]] && [[ "$pane_cmd" != "null" ]] && [[ "$pane_cmd" != "" ]]; then
+            # Get optional working_dir for command pane, default to worktree root
+            local cmd_working_dir
+            cmd_working_dir=$(echo "$pane_config" | yq -r '.working_dir // ""' 2>/dev/null)
+
+            # CD to working directory (or root if not specified)
+            if [[ -n "$root_dir" ]]; then
+                if [[ -n "$cmd_working_dir" ]] && [[ "$cmd_working_dir" != "null" ]] && [[ "$cmd_working_dir" != "." ]]; then
+                    tmux send-keys -t "${session}:${window}.${p}" "cd '$root_dir/$cmd_working_dir'" Enter
+                else
+                    tmux send-keys -t "${session}:${window}.${p}" "cd '$root_dir'" Enter
+                fi
+            fi
             tmux send-keys -t "${session}:${window}.${p}" "$pane_cmd" Enter
         fi
     done
