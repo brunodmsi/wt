@@ -57,11 +57,24 @@ start_service() {
     local slot
     slot=$(get_worktree_slot "$project" "$branch")
 
+    if [[ -z "$slot" ]]; then
+        log_error "Could not find slot for worktree '$branch'. State may be corrupted."
+        log_error "Try: wt delete $branch && wt create $branch"
+        return 1
+    fi
+
+    log_debug "Getting port for service=$service_name port_key=$port_key branch=$branch slot=$slot"
+
     local port
     port=$(get_service_port "$port_key" "$branch" "$config_file" "$slot")
 
+    log_debug "Got port=$port for $service_name"
+
     if [[ -z "$port" ]]; then
         log_error "Could not determine port for service: $service_name"
+        log_error "  port_key=$port_key, slot=$slot, config=$config_file"
+        # Debug: show what calculate_worktree_ports returns
+        log_error "  Available ports: $(calculate_worktree_ports "$branch" "$config_file" "$slot" | tr '\n' ' ')"
         return 1
     fi
 

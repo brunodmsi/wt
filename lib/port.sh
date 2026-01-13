@@ -74,15 +74,16 @@ export_port_vars() {
     local branch="$1"
     local config_file="$2"
     local slot="$3"
+    local svc_name svc_port  # Declare loop vars local to avoid clobbering caller's vars
 
-    while IFS=: read -r service port; do
-        [[ -z "$service" ]] && continue
+    while IFS=: read -r svc_name svc_port; do
+        [[ -z "$svc_name" ]] && continue
 
         # Export PORT_<SERVICE_NAME> (uppercase, dashes to underscores)
         local var_name
-        var_name="PORT_$(echo "$service" | tr '[:lower:]-' '[:upper:]_')"
-        export "$var_name=$port"
-        log_debug "Exported port: $var_name=$port"
+        var_name="PORT_$(echo "$svc_name" | tr '[:lower:]-' '[:upper:]_')"
+        export "$var_name=$svc_port"
+        log_debug "Exported port: $var_name=$svc_port"
     done < <(calculate_worktree_ports "$branch" "$config_file" "$slot")
 }
 
