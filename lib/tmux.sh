@@ -103,6 +103,11 @@ setup_window_panes_for_worktree() {
 }
 
 # Custom layout for worktree window: services on top, main pane on bottom
+# +----------+----------+----------+
+# | service1 | service2 | service3 |  <- 65% height
+# +----------+----------+----------+
+# |       claude (full width)      |  <- 35% height
+# +--------------------------------+
 setup_services_top_layout_window() {
     local session="$1"
     local window="$2"
@@ -112,22 +117,27 @@ setup_services_top_layout_window() {
 
     local service_count=$((pane_count - 1))
 
-    # Split horizontally: top for services, bottom for main pane
-    tmux split-window -t "${session}:${window}" -v -p 35
+    # Start with pane 0 (the initial pane)
+    # First, split vertically: top stays as pane 0, bottom becomes last pane
+    tmux split-window -t "${session}:${window}.0" -v -p 35
 
-    # Split top pane for services
-    tmux select-pane -t "${session}:${window}.0"
+    # Now pane 0 is top (65%), pane 1 is bottom (35%)
+    # Split pane 0 horizontally for each additional service
     for ((s = 1; s < service_count; s++)); do
-        tmux split-window -t "${session}:${window}.0" -h
+        tmux split-window -t "${session}:${window}.0" -h -p $((100 / (service_count - s + 1)))
     done
 
-    # Balance the top panes
-    tmux select-layout -t "${session}:${window}" tiled 2>/dev/null || true
+    # After splits, panes are: 0,1,2 = services (top row), 3 = bottom (claude)
+    # But pane indices may have shifted. Let's use even-horizontal on top row only.
+    # Unfortunately tmux doesn't support partial layouts easily, so we manually size.
 
-    # Configure panes
+    # Select pane 0 and apply even-horizontal to just the top panes
+    # This is tricky - instead let's just accept the split percentages above
+
+    # Configure panes with their directories and commands
     configure_window_panes "$session" "$window" "$config_file" "$pane_count" "$root_dir"
 
-    # Select bottom pane
+    # Select bottom pane (claude)
     tmux select-pane -t "${session}:${window}.$((pane_count - 1))"
 }
 
@@ -269,27 +279,16 @@ setup_services_top_layout() {
 
     local service_count=$((pane_count - 1))
 
-    # First, split horizontally to create top and bottom sections
-    # Pane 0 will be top, we'll split it for services
-    # Then create bottom pane
-    tmux split-window -t "${session}:${window}" -v -p 35  # Bottom pane gets 35%
+    # First, split vertically: top (65%) for services, bottom (35%) for main pane
+    tmux split-window -t "${session}:${window}.0" -v -p 35
 
     # Now pane 0 is top, pane 1 is bottom
-    # Split top pane horizontally for services
-    tmux select-pane -t "${session}:${window}.0"
-
+    # Split top pane horizontally for each additional service with equal widths
     for ((s = 1; s < service_count; s++)); do
-        tmux split-window -t "${session}:${window}.0" -h
+        tmux split-window -t "${session}:${window}.0" -h -p $((100 / (service_count - s + 1)))
     done
 
-    # Rebalance the top panes
-    tmux select-layout -t "${session}:${window}" tiled 2>/dev/null || true
-
-    # Now manually adjust: we want top row even-horizontal, bottom full width
-    # Use select-layout with specific dimensions isn't easy, so we'll use tiled
-    # and the -p percentage already set the bottom pane size
-
-    # Configure each pane - note pane indices change after splits
+    # Configure each pane
     # After our splits: panes 0,1,2 are services (top), pane 3 is bottom (claude)
     # But tmux renumbers, so let's configure by iterating
     for ((p = 0; p < pane_count; p++)); do
