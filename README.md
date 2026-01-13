@@ -1,0 +1,148 @@
+# wt - Git Worktree Manager
+
+A CLI tool for managing git worktrees with tmux integration, automatic port allocation, and per-project setup automation.
+
+## Why?
+
+When working on multiple features/branches simultaneously, constantly switching branches is painful. Git worktrees let you have multiple branches checked out at once, but setting them up (especially for projects with submodules, multiple services, and specific port requirements) is tedious.
+
+`wt` automates all of that.
+
+## Features
+
+- **Worktree lifecycle**: `create`, `delete`, `list`, `status`
+- **Service management**: Start/stop services in tmux panes
+- **Port allocation**: Reserved ports for OAuth/Privy, hash-based dynamic ports
+- **Setup automation**: Run install scripts, copy envs, init submodules
+- **tmux integration**: Auto-create sessions with configured layouts
+- **Shell completions**: Tab-complete branch names
+
+## Installation
+
+```bash
+# Install dependencies
+brew install yq tmux
+
+# Run installer
+./install.sh
+
+# Restart shell or source completions
+source ~/.zshrc  # or ~/.bashrc
+```
+
+## Quick Start
+
+```bash
+# 1. Initialize in your project
+cd ~/your-project
+wt init
+
+# 2. Edit the config
+$EDITOR ~/.config/wt/projects/your-project.yaml
+
+# 3. Create a worktree
+wt create feature/my-feature --from main
+
+# 4. Start services
+wt start feature/my-feature --all
+
+# 5. Attach to tmux
+wt attach feature/my-feature
+
+# 6. When done
+wt stop feature/my-feature --all
+wt delete feature/my-feature
+```
+
+## Commands
+
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `wt create <branch>` | `new` | Create worktree + run setup |
+| `wt delete <branch>` | `rm` | Stop services, kill tmux, remove worktree |
+| `wt list` | `ls` | List all worktrees |
+| `wt start <branch> --all` | `up` | Start services |
+| `wt stop <branch> --all` | `down` | Stop services |
+| `wt status <branch>` | `st` | Show worktree & service status |
+| `wt attach <branch>` | `a` | Attach to tmux session |
+| `wt ports <branch>` | | Show port assignments |
+| `wt config --edit` | | Edit project config |
+
+## Configuration
+
+Configs live in `~/.config/wt/projects/<name>.yaml`
+
+```yaml
+name: my-project
+repo_path: ~/code/my-project
+
+ports:
+  reserved:
+    range: { min: 3000, max: 3005 }
+    slots: 3  # max concurrent worktrees
+    services:
+      frontend: 0  # slot_base + 0
+      backend: 1   # slot_base + 1
+  dynamic:
+    range: { min: 4000, max: 5000 }
+    services:
+      worker: true  # hash-based port
+
+setup:
+  - name: install-deps
+    command: npm install
+    working_dir: "."
+
+services:
+  - name: frontend
+    command: npm run dev
+    working_dir: frontend
+    port_key: frontend
+
+tmux:
+  layout: services-top  # custom layout: services on top, main pane bottom
+  windows:
+    - name: dev
+      panes:
+        - service: frontend
+        - service: backend
+        - command: claude  # bottom pane
+```
+
+## Port Allocation
+
+For services requiring specific ports (OAuth callbacks, Privy):
+
+| Slot | Service 0 | Service 1 |
+|------|-----------|-----------|
+| 0 | 3000 | 3001 |
+| 1 | 3002 | 3003 |
+| 2 | 3004 | 3005 |
+
+Max 3 concurrent worktrees can use reserved ports. Dynamic services get deterministic hash-based ports.
+
+## Tips
+
+- **Copy envs from main repo**: In setup steps, use `cp ../../../service/.env .env` to copy from the main repo's service directory
+- **Check ports**: `wt ports <branch> --check` shows if ports are in use
+- **Custom tmux layout**: Use `layout: services-top` for services on top, main pane on bottom
+- **Skip setup**: `wt create <branch> --no-setup` to skip setup steps
+- **Run single step**: `wt run <branch> <step-name>` to re-run a setup step
+
+## File Structure
+
+```
+~/.config/wt/
+├── config.yaml              # Global defaults
+└── projects/
+    └── <project>.yaml       # Per-project config
+
+~/.local/share/wt/
+└── state/
+    ├── slots.yaml           # Port slot assignments
+    └── <project>.state.yaml # Worktree & service state
+```
+
+## License
+
+MIT
