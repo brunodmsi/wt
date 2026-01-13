@@ -104,9 +104,9 @@ setup_window_panes_for_worktree() {
 
 # Custom layout for worktree window: services on top, main pane on bottom
 # +----------+----------+----------+
-# | service1 | service2 | service3 |  <- 65% height
+# | service1 | service2 | service3 |  <- 35% height
 # +----------+----------+----------+
-# |       claude (full width)      |  <- 35% height
+# |       claude (full width)      |  <- 65% height
 # +--------------------------------+
 setup_services_top_layout_window() {
     local session="$1"
@@ -119,9 +119,9 @@ setup_services_top_layout_window() {
 
     # Start with pane 0 (the initial pane)
     # First, split vertically: top stays as pane 0, bottom becomes last pane
-    tmux split-window -t "${session}:${window}.0" -v -p 35
+    tmux split-window -t "${session}:${window}.0" -v -p 65
 
-    # Now pane 0 is top (65%), pane 1 is bottom (35%)
+    # Now pane 0 is top (35%), pane 1 is bottom (65%)
     # Split pane 0 horizontally for each additional service
     for ((s = 1; s < service_count; s++)); do
         tmux split-window -t "${session}:${window}.0" -h -p $((100 / (service_count - s + 1)))
@@ -279,8 +279,8 @@ setup_services_top_layout() {
 
     local service_count=$((pane_count - 1))
 
-    # First, split vertically: top (65%) for services, bottom (35%) for main pane
-    tmux split-window -t "${session}:${window}.0" -v -p 35
+    # First, split vertically: top (35%) for services, bottom (65%) for main pane
+    tmux split-window -t "${session}:${window}.0" -v -p 65
 
     # Now pane 0 is top, pane 1 is bottom
     # Split top pane horizontally for each additional service with equal widths

@@ -34,6 +34,7 @@ calculate_worktree_ports() {
     local branch="$1"
     local config_file="$2"
     local slot="$3"
+    local svc_name offset svc_port  # Declare loop vars local
 
     local reserved_base
     reserved_base=$(yaml_get "$config_file" ".ports.reserved.range.min" "3000")
@@ -53,19 +54,17 @@ calculate_worktree_ports() {
     dynamic_services=$(yq -r '.ports.dynamic.services // {} | keys | .[]' "$config_file" 2>/dev/null)
 
     # Output reserved service ports
-    while IFS=: read -r service offset; do
-        [[ -z "$service" ]] && continue
-        local port
-        port=$(calculate_reserved_port "$slot" "$offset" "$reserved_base")
-        echo "$service:$port"
+    while IFS=: read -r svc_name offset; do
+        [[ -z "$svc_name" ]] && continue
+        svc_port=$(calculate_reserved_port "$slot" "$offset" "$reserved_base")
+        echo "$svc_name:$svc_port"
     done <<< "$reserved_services"
 
     # Output dynamic service ports
-    while read -r service; do
-        [[ -z "$service" ]] && continue
-        local port
-        port=$(calculate_dynamic_port "$branch" "$dynamic_min" "$dynamic_max")
-        echo "$service:$port"
+    while read -r svc_name; do
+        [[ -z "$svc_name" ]] && continue
+        svc_port=$(calculate_dynamic_port "$branch" "$dynamic_min" "$dynamic_max")
+        echo "$svc_name:$svc_port"
     done <<< "$dynamic_services"
 }
 

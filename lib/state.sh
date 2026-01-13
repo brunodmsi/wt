@@ -240,14 +240,15 @@ is_service_running() {
 cleanup_stale_services() {
     local project="$1"
     local branch="$2"
+    local svc_name svc_status svc_port svc_pid  # Declare local to avoid clobbering caller's vars
 
-    while IFS=: read -r service status port pid; do
-        [[ -z "$service" ]] && continue
+    while IFS=: read -r svc_name svc_status svc_port svc_pid; do
+        [[ -z "$svc_name" ]] && continue
 
-        if [[ -n "$pid" ]] && [[ "$pid" != "null" ]]; then
-            if ! kill -0 "$pid" 2>/dev/null; then
-                log_debug "Cleaning up stale service: $service (PID $pid)"
-                update_service_status "$project" "$branch" "$service" "stopped"
+        if [[ -n "$svc_pid" ]] && [[ "$svc_pid" != "null" ]]; then
+            if ! kill -0 "$svc_pid" 2>/dev/null; then
+                log_debug "Cleaning up stale service: $svc_name (PID $svc_pid)"
+                update_service_status "$project" "$branch" "$svc_name" "stopped"
             fi
         fi
     done < <(list_service_states "$project" "$branch")
