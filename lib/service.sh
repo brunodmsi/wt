@@ -1,0 +1,315 @@
+#!/bin/bash
+# lib/service.sh - Service lifecycle management
+
+# Start a service
+start_service() {
+    local project="$1"
+    local branch="$2"
+    local service_name="$3"
+    local config_file="$4"
+
+    local worktree_path
+    worktree_path=$(get_worktree_path "$project" "$branch")
+
+    if [[ -z "$worktree_path" ]] || [[ ! -d "$worktree_path" ]]; then
+        log_error "Worktree not found for branch: $branch"
+        return 1
+    fi
+
+    # Get service configuration
+    local svc_dir
+    svc_dir=$(get_service_config "$config_file" "$service_name" "working_dir")
+
+    local svc_cmd
+    svc_cmd=$(get_service_config "$config_file" "$service_name" "command")
+
+    local port_key
+    port_key=$(get_service_config "$config_file" "$service_name" "port_key")
+
+    if [[ -z "$svc_cmd" ]] || [[ "$svc_cmd" == "null" ]]; then
+        log_error "Service not found or has no command: $service_name"
+        return 1
+    fi
+
+    # Get port for this service
+    local slot
+    slot=$(get_worktree_slot "$project" "$branch")
+
+    local port
+    port=$(get_service_port "$port_key" "$branch" "$config_file" "$slot")
+
+    if [[ -z "$port" ]]; then
+        log_error "Could not determine port for service: $service_name"
+        return 1
+    fi
+
+    # Check if already running
+    if is_service_running "$project" "$branch" "$service_name"; then
+        log_warn "Service already running: $service_name"
+        return 0
+    fi
+
+    # Export port variables
+    export PORT="$port"
+    export_port_vars "$branch" "$config_file" "$slot"
+
+    # Get service environment
+    local svc_env
+    svc_env=$(yq -r ".services[] | select(.name == \"$service_name\") | .env // {} | to_entries | .[] | \"\(.key)=\(.value)\"" "$config_file" 2>/dev/null)
+
+    while IFS='=' read -r key value; do
+        [[ -z "$key" ]] && continue
+        value=$(eval echo "$value" 2>/dev/null || echo "$value")
+        export "$key=$value"
+    done <<< "$svc_env"
+
+    # Run pre_start commands
+    local pre_start
+    pre_start=$(yq -r ".services[] | select(.name == \"$service_name\") | .pre_start // [] | .[]" "$config_file" 2>/dev/null)
+
+    while read -r cmd; do
+        [[ -z "$cmd" ]] && continue
+        log_debug "Pre-start: $cmd"
+        eval "$cmd" 2>/dev/null || true
+    done <<< "$pre_start"
+
+    # Get tmux session
+    local session
+    session=$(get_session_name "$project" "$branch")
+
+    local exec_dir="$worktree_path/$svc_dir"
+
+    log_info "Starting $service_name on port $port..."
+
+    # Find or create pane for service
+    local pane_target
+    pane_target=$(find_service_pane "$session" "$service_name" "$config_file")
+
+    if [[ -n "$pane_target" ]]; then
+        # Send command to existing pane
+        local window="${pane_target%%:*}"
+        local pane="${pane_target##*:}"
+
+        tmux send-keys -t "${session}:${window}.${pane}" "cd '$exec_dir' && PORT=$port $svc_cmd" Enter
+    else
+        # Create new window for service
+        create_service_window "$session" "$service_name" "$exec_dir"
+        tmux send-keys -t "${session}:${service_name}" "PORT=$port $svc_cmd" Enter
+    fi
+
+    # Update state (we don't have PID directly since it's in tmux)
+    update_service_status "$project" "$branch" "$service_name" "running" "" "$port"
+
+    # Run health check if configured
+    local health_type
+    health_type=$(yq -r ".services[] | select(.name == \"$service_name\") | .health_check.type // \"\"" "$config_file" 2>/dev/null)
+
+    if [[ -n "$health_type" ]] && [[ "$health_type" != "null" ]]; then
+        run_health_check "$service_name" "$port" "$config_file"
+    fi
+
+    log_success "Started: $service_name (port $port)"
+    return 0
+}
+
+# Stop a service
+stop_service() {
+    local project="$1"
+    local branch="$2"
+    local service_name="$3"
+    local config_file="$4"
+
+    log_info "Stopping $service_name..."
+
+    # Get tmux session
+    local session
+    session=$(get_session_name "$project" "$branch")
+
+    # Try to find and interrupt the service pane
+    local pane_target
+    pane_target=$(find_service_pane "$session" "$service_name" "$config_file")
+
+    if [[ -n "$pane_target" ]]; then
+        local window="${pane_target%%:*}"
+        local pane="${pane_target##*:}"
+        interrupt_pane "$session" "${window}.${pane}"
+    else
+        # Try service-named window
+        if tmux list-windows -t "$session" -F "#{window_name}" 2>/dev/null | grep -q "^${service_name}$"; then
+            interrupt_pane "$session" "$service_name"
+        fi
+    fi
+
+    # Update state
+    update_service_status "$project" "$branch" "$service_name" "stopped"
+
+    log_success "Stopped: $service_name"
+    return 0
+}
+
+# Start all services
+start_all_services() {
+    local project="$1"
+    local branch="$2"
+    local config_file="$3"
+
+    local service_count
+    service_count=$(get_services "$config_file")
+
+    if [[ "$service_count" -eq 0 ]]; then
+        log_info "No services configured"
+        return 0
+    fi
+
+    log_info "Starting $service_count services..."
+
+    local failed=0
+
+    for ((i = 0; i < service_count; i++)); do
+        local name
+        name=$(get_service_by_index "$config_file" "$i" "name")
+
+        if ! start_service "$project" "$branch" "$name" "$config_file"; then
+            ((failed++))
+        fi
+
+        # Small delay between service starts
+        sleep 1
+    done
+
+    if [[ "$failed" -gt 0 ]]; then
+        log_warn "$failed service(s) failed to start"
+        return 1
+    fi
+
+    log_success "All services started"
+    return 0
+}
+
+# Stop all services
+stop_all_services() {
+    local project="$1"
+    local branch="$2"
+    local config_file="$3"
+
+    local service_count
+    service_count=$(get_services "$config_file")
+
+    if [[ "$service_count" -eq 0 ]]; then
+        return 0
+    fi
+
+    log_info "Stopping $service_count services..."
+
+    for ((i = 0; i < service_count; i++)); do
+        local name
+        name=$(get_service_by_index "$config_file" "$i" "name")
+        stop_service "$project" "$branch" "$name" "$config_file"
+    done
+
+    log_success "All services stopped"
+}
+
+# Run health check for a service
+run_health_check() {
+    local service_name="$1"
+    local port="$2"
+    local config_file="$3"
+
+    local health_type
+    health_type=$(yq -r ".services[] | select(.name == \"$service_name\") | .health_check.type" "$config_file" 2>/dev/null)
+
+    local timeout
+    timeout=$(yq -r ".services[] | select(.name == \"$service_name\") | .health_check.timeout // 30" "$config_file" 2>/dev/null)
+
+    local interval
+    interval=$(yq -r ".services[] | select(.name == \"$service_name\") | .health_check.interval // 2" "$config_file" 2>/dev/null)
+
+    log_info "Running health check for $service_name (${health_type}, timeout: ${timeout}s)..."
+
+    local elapsed=0
+
+    case "$health_type" in
+        tcp)
+            while ! nc -z localhost "$port" 2>/dev/null; do
+                if ((elapsed >= timeout)); then
+                    log_warn "Health check timed out for $service_name"
+                    return 1
+                fi
+                sleep "$interval"
+                ((elapsed += interval))
+            done
+            ;;
+        http)
+            local url
+            url=$(yq -r ".services[] | select(.name == \"$service_name\") | .health_check.url" "$config_file" 2>/dev/null)
+            url=$(eval echo "$url")
+
+            while ! curl -sf "$url" &>/dev/null; do
+                if ((elapsed >= timeout)); then
+                    log_warn "Health check timed out for $service_name"
+                    return 1
+                fi
+                sleep "$interval"
+                ((elapsed += interval))
+            done
+            ;;
+        *)
+            # No health check
+            return 0
+            ;;
+    esac
+
+    log_success "Health check passed for $service_name"
+    return 0
+}
+
+# Get service status
+get_service_status() {
+    local project="$1"
+    local branch="$2"
+    local service_name="$3"
+
+    local status
+    status=$(get_service_state "$project" "$branch" "$service_name" "status")
+
+    echo "${status:-unknown}"
+}
+
+# List all services with their status
+list_services_status() {
+    local project="$1"
+    local branch="$2"
+    local config_file="$3"
+
+    local service_count
+    service_count=$(get_services "$config_file")
+
+    local slot
+    slot=$(get_worktree_slot "$project" "$branch")
+
+    printf "\n${BOLD}%-25s %-10s %-8s${NC}\n" "SERVICE" "STATUS" "PORT"
+    printf "%s\n" "$(printf '%.0s-' {1..45})"
+
+    for ((i = 0; i < service_count; i++)); do
+        local name
+        name=$(get_service_by_index "$config_file" "$i" "name")
+
+        local port_key
+        port_key=$(get_service_by_index "$config_file" "$i" "port_key")
+
+        local port
+        port=$(get_service_port "$port_key" "$branch" "$config_file" "$slot")
+
+        local status
+        status=$(get_service_status "$project" "$branch" "$name")
+
+        local status_color="$YELLOW"
+        case "$status" in
+            running) status_color="$GREEN" ;;
+            stopped) status_color="$RED" ;;
+        esac
+
+        printf "%-25s ${status_color}%-10s${NC} %-8s\n" "$name" "$status" "${port:-N/A}"
+    done
+}

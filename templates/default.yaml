@@ -1,0 +1,77 @@
+# Default project configuration template
+# This file will be copied and customized when running 'wt init'
+
+name: ""  # Will be set automatically
+repo_path: ""  # Will be set automatically
+
+# Port configuration
+ports:
+  # Reserved ports for services requiring specific ports (e.g., OAuth callbacks)
+  reserved:
+    range: { min: 3000, max: 3005 }
+    slots: 3  # Maximum concurrent worktrees with reserved ports
+    services: {}
+      # Add services that need reserved ports:
+      # frontend: 0  # Gets slot_base + 0 (3000, 3002, or 3004)
+      # backend: 1   # Gets slot_base + 1 (3001, 3003, or 3005)
+
+  # Dynamic ports for flexible services (hash-based assignment)
+  dynamic:
+    range: { min: 4000, max: 5000 }
+    services: {}
+      # Add services that can use any port:
+      # api: true
+
+# Global environment variables for all worktrees
+env:
+  NODE_ENV: development
+
+# Setup steps (executed on 'wt create')
+setup: []
+  # Example setup steps:
+  # - name: install-deps
+  #   description: "Install dependencies"
+  #   command: npm install
+  #   working_dir: "."
+  #   on_failure: abort  # abort | continue | retry
+  #   depends_on: []
+  #
+  # - name: setup-env
+  #   description: "Copy environment file"
+  #   command: cp .env.example .env
+  #   working_dir: "."
+  #   depends_on: [install-deps]
+  #   condition: "[ ! -f .env ]"
+
+# Services (can be started/stopped with 'wt start/stop')
+services: []
+  # Example service:
+  # - name: app
+  #   description: "Main application"
+  #   working_dir: "."
+  #   command: npm run dev
+  #   port_key: app  # References ports.reserved or ports.dynamic
+  #   env:
+  #     PORT: "${PORT}"
+  #   pre_start: []  # Commands to run before starting
+  #   health_check:
+  #     type: tcp  # tcp | http
+  #     port: "${PORT}"
+  #     timeout: 30
+
+# tmux session configuration
+tmux:
+  layout: tiled
+  windows:
+    - name: shell
+      panes:
+        - ""  # Empty pane for shell
+
+# Hooks (shell commands run at specific events)
+hooks: {}
+  # post_create: |
+  #   echo "Worktree created at ${WORKTREE_PATH}"
+  # post_start: |
+  #   echo "Services started for ${BRANCH_NAME}"
+  # pre_delete: |
+  #   echo "About to delete worktree for ${BRANCH_NAME}"

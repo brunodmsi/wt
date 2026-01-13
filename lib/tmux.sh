@@ -1,0 +1,343 @@
+#!/bin/bash
+# lib/tmux.sh - tmux session management
+
+# Check if tmux is available
+ensure_tmux() {
+    if ! command_exists tmux; then
+        die "tmux is required but not installed. Install with: brew install tmux"
+    fi
+}
+
+# Check if a tmux session exists
+session_exists() {
+    local session="$1"
+    tmux has-session -t "$session" 2>/dev/null
+}
+
+# Create a new tmux session
+create_session() {
+    local session="$1"
+    local root_dir="$2"
+    local config_file="$3"
+
+    ensure_tmux
+
+    if session_exists "$session"; then
+        log_warn "Session already exists: $session"
+        return 1
+    fi
+
+    log_info "Creating tmux session: $session"
+
+    # Create detached session
+    tmux new-session -d -s "$session" -c "$root_dir"
+
+    # Setup windows from config
+    setup_tmux_windows "$session" "$root_dir" "$config_file"
+
+    log_success "tmux session created: $session"
+    return 0
+}
+
+# Setup tmux windows from configuration
+setup_tmux_windows() {
+    local session="$1"
+    local root_dir="$2"
+    local config_file="$3"
+
+    local window_count
+    window_count=$(yaml_array_length "$config_file" ".tmux.windows")
+
+    if [[ "$window_count" -eq 0 ]]; then
+        # No windows configured, create a default shell window
+        tmux rename-window -t "${session}:0" "shell"
+        return
+    fi
+
+    for ((i = 0; i < window_count; i++)); do
+        local window_name
+        window_name=$(yaml_get "$config_file" ".tmux.windows[$i].name" "window-$i")
+
+        local window_root
+        window_root=$(yaml_get "$config_file" ".tmux.windows[$i].root" "")
+
+        local layout
+        layout=$(yaml_get "$config_file" ".tmux.windows[$i].layout" "even-horizontal")
+
+        # Determine window working directory
+        local win_dir="$root_dir"
+        if [[ -n "$window_root" ]] && [[ "$window_root" != "null" ]]; then
+            win_dir="$root_dir/$window_root"
+        fi
+
+        # Create or rename window
+        if [[ "$i" -eq 0 ]]; then
+            tmux rename-window -t "${session}:0" "$window_name"
+            tmux send-keys -t "${session}:${window_name}" "cd '$win_dir'" Enter
+        else
+            tmux new-window -t "$session" -n "$window_name" -c "$win_dir"
+        fi
+
+        # Setup panes
+        setup_window_panes "$session" "$window_name" "$root_dir" "$config_file" "$i" "$layout"
+    done
+
+    # Select first window
+    tmux select-window -t "${session}:0"
+}
+
+# Setup panes for a window
+setup_window_panes() {
+    local session="$1"
+    local window="$2"
+    local root_dir="$3"
+    local config_file="$4"
+    local win_idx="$5"
+    local layout="$6"
+
+    local pane_count
+    pane_count=$(yaml_array_length "$config_file" ".tmux.windows[$win_idx].panes")
+
+    if [[ "$pane_count" -eq 0 ]]; then
+        return
+    fi
+
+    # Check for custom layout: "services-top" puts N-1 panes on top row, last pane full-width bottom
+    if [[ "$layout" == "services-top" ]] && [[ "$pane_count" -gt 1 ]]; then
+        setup_services_top_layout "$session" "$window" "$root_dir" "$config_file" "$win_idx" "$pane_count"
+        return
+    fi
+
+    # Create additional panes (first pane already exists)
+    for ((p = 1; p < pane_count; p++)); do
+        tmux split-window -t "${session}:${window}"
+    done
+
+    # Apply layout
+    tmux select-layout -t "${session}:${window}" "$layout" 2>/dev/null || true
+
+    # Configure each pane
+    configure_panes "$session" "$window" "$config_file" "$win_idx" "$pane_count"
+}
+
+# Custom layout: services on top (vertical), main pane on bottom (full-width)
+# +----------+----------+----------+
+# | service1 | service2 | service3 |
+# +----------+----------+----------+
+# |       main pane (full width)   |
+# +--------------------------------+
+setup_services_top_layout() {
+    local session="$1"
+    local window="$2"
+    local root_dir="$3"
+    local config_file="$4"
+    local win_idx="$5"
+    local pane_count="$6"
+
+    local service_count=$((pane_count - 1))
+
+    # First, split horizontally to create top and bottom sections
+    # Pane 0 will be top, we'll split it for services
+    # Then create bottom pane
+    tmux split-window -t "${session}:${window}" -v -p 35  # Bottom pane gets 35%
+
+    # Now pane 0 is top, pane 1 is bottom
+    # Split top pane horizontally for services
+    tmux select-pane -t "${session}:${window}.0"
+
+    for ((s = 1; s < service_count; s++)); do
+        tmux split-window -t "${session}:${window}.0" -h
+    done
+
+    # Rebalance the top panes
+    tmux select-layout -t "${session}:${window}" tiled 2>/dev/null || true
+
+    # Now manually adjust: we want top row even-horizontal, bottom full width
+    # Use select-layout with specific dimensions isn't easy, so we'll use tiled
+    # and the -p percentage already set the bottom pane size
+
+    # Configure each pane - note pane indices change after splits
+    # After our splits: panes 0,1,2 are services (top), pane 3 is bottom (claude)
+    # But tmux renumbers, so let's configure by iterating
+    for ((p = 0; p < pane_count; p++)); do
+        local pane_config
+        pane_config=$(yq ".tmux.windows[$win_idx].panes[$p]" "$config_file" 2>/dev/null)
+
+        local pane_type
+        pane_type=$(echo "$pane_config" | yq 'type' 2>/dev/null)
+
+        local pane_service=""
+        local pane_cmd=""
+
+        if [[ "$pane_type" == "\"string\"" ]]; then
+            pane_cmd=$(echo "$pane_config" | yq -r '.' 2>/dev/null)
+        else
+            pane_service=$(echo "$pane_config" | yq -r '.service // ""' 2>/dev/null)
+            pane_cmd=$(echo "$pane_config" | yq -r '.command // ""' 2>/dev/null)
+        fi
+
+        if [[ -n "$pane_service" ]] && [[ "$pane_service" != "null" ]]; then
+            tmux send-keys -t "${session}:${window}.${p}" "# Service: $pane_service (use 'wt start' to run)" Enter
+        elif [[ -n "$pane_cmd" ]] && [[ "$pane_cmd" != "null" ]] && [[ "$pane_cmd" != "" ]]; then
+            tmux send-keys -t "${session}:${window}.${p}" "$pane_cmd" Enter
+        fi
+    done
+
+    # Select the bottom pane (claude) as active
+    tmux select-pane -t "${session}:${window}.$((pane_count - 1))"
+}
+
+# Configure panes with commands/services
+configure_panes() {
+    local session="$1"
+    local window="$2"
+    local config_file="$3"
+    local win_idx="$4"
+    local pane_count="$5"
+
+    for ((p = 0; p < pane_count; p++)); do
+        local pane_config
+        pane_config=$(yq ".tmux.windows[$win_idx].panes[$p]" "$config_file" 2>/dev/null)
+
+        local pane_type
+        pane_type=$(echo "$pane_config" | yq 'type' 2>/dev/null)
+
+        local pane_service=""
+        local pane_cmd=""
+
+        if [[ "$pane_type" == "\"string\"" ]]; then
+            pane_cmd=$(echo "$pane_config" | yq -r '.' 2>/dev/null)
+        else
+            pane_service=$(echo "$pane_config" | yq -r '.service // ""' 2>/dev/null)
+            pane_cmd=$(echo "$pane_config" | yq -r '.command // ""' 2>/dev/null)
+        fi
+
+        if [[ -n "$pane_service" ]] && [[ "$pane_service" != "null" ]]; then
+            tmux send-keys -t "${session}:${window}.${p}" "# Service: $pane_service (use 'wt start' to run)" Enter
+        elif [[ -n "$pane_cmd" ]] && [[ "$pane_cmd" != "null" ]] && [[ "$pane_cmd" != "" ]]; then
+            tmux send-keys -t "${session}:${window}.${p}" "$pane_cmd" Enter
+        fi
+    done
+}
+
+# Kill a tmux session
+kill_session() {
+    local session="$1"
+
+    if ! session_exists "$session"; then
+        log_debug "Session does not exist: $session"
+        return 0
+    fi
+
+    log_info "Killing tmux session: $session"
+    tmux kill-session -t "$session"
+}
+
+# Attach to a tmux session
+attach_session() {
+    local session="$1"
+    local window="${2:-}"
+
+    ensure_tmux
+
+    if ! session_exists "$session"; then
+        log_error "Session does not exist: $session"
+        return 1
+    fi
+
+    if [[ -n "$window" ]]; then
+        tmux select-window -t "${session}:${window}" 2>/dev/null
+    fi
+
+    # Check if we're already in tmux
+    if [[ -n "${TMUX:-}" ]]; then
+        tmux switch-client -t "$session"
+    else
+        tmux attach-session -t "$session"
+    fi
+}
+
+# List tmux sessions matching pattern
+list_sessions() {
+    local pattern="${1:-wt-*}"
+    tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "^$pattern" || true
+}
+
+# Send command to a specific pane
+send_to_pane() {
+    local session="$1"
+    local window="$2"
+    local pane="$3"
+    local command="$4"
+
+    tmux send-keys -t "${session}:${window}.${pane}" "$command" Enter
+}
+
+# Find pane for a service
+find_service_pane() {
+    local session="$1"
+    local service_name="$2"
+    local config_file="$3"
+
+    local window_count
+    window_count=$(yaml_array_length "$config_file" ".tmux.windows")
+
+    for ((w = 0; w < window_count; w++)); do
+        local window_name
+        window_name=$(yaml_get "$config_file" ".tmux.windows[$w].name" "window-$w")
+
+        local pane_count
+        pane_count=$(yaml_array_length "$config_file" ".tmux.windows[$w].panes")
+
+        for ((p = 0; p < pane_count; p++)); do
+            local pane_service
+            pane_service=$(yq -r ".tmux.windows[$w].panes[$p].service // \"\"" "$config_file" 2>/dev/null)
+
+            if [[ "$pane_service" == "$service_name" ]]; then
+                echo "${window_name}:${p}"
+                return 0
+            fi
+        done
+    done
+
+    return 1
+}
+
+# Create a new window for a service
+create_service_window() {
+    local session="$1"
+    local service_name="$2"
+    local working_dir="$3"
+
+    if ! session_exists "$session"; then
+        log_error "Session does not exist: $session"
+        return 1
+    fi
+
+    # Check if window already exists
+    if tmux list-windows -t "$session" -F "#{window_name}" | grep -q "^${service_name}$"; then
+        log_debug "Window already exists: $service_name"
+        return 0
+    fi
+
+    tmux new-window -t "$session" -n "$service_name" -c "$working_dir"
+}
+
+# Get session info
+session_info() {
+    local session="$1"
+
+    if ! session_exists "$session"; then
+        return 1
+    fi
+
+    tmux list-windows -t "$session" -F "#{window_index}:#{window_name}:#{window_active}"
+}
+
+# Send interrupt (Ctrl+C) to a pane
+interrupt_pane() {
+    local session="$1"
+    local target="$2"  # window:pane or just window
+
+    tmux send-keys -t "${session}:${target}" C-c
+}
