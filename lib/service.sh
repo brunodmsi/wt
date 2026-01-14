@@ -97,17 +97,25 @@ start_service() {
         return 0
     fi
 
-    # Export port variables
+    # Export port variables (for local use and variable expansion)
     export PORT="$port"
     export_port_vars "$branch" "$config_file" "$slot"
 
-    # Get service environment
+    # Build environment string for tmux command
+    # Start with PORT
+    local env_string="PORT=$port"
+
+    # Get service environment and build env string
     local svc_env
     svc_env=$(yq -r ".services[] | select(.name == \"$service_name\") | .env // {} | to_entries | .[] | \"\(.key)=\(.value)\"" "$config_file" 2>/dev/null)
 
     while IFS='=' read -r key value; do
         [[ -z "$key" ]] && continue
+        # Expand variables in value (e.g., ${PORT_GAP_INDEXER})
         value=$(eval echo "$value" 2>/dev/null || echo "$value")
+        # Add to env string for tmux command
+        env_string="$env_string $key=$value"
+        # Also export locally for pre_start commands
         export "$key=$value"
     done <<< "$svc_env"
 
@@ -141,12 +149,12 @@ start_service() {
     pane_idx=$(find_service_pane_index "$config_file" "$service_name")
 
     if [[ -n "$pane_idx" ]]; then
-        # Send command to the service pane
-        tmux send-keys -t "${tmux_session}:${window_name}.${pane_idx}" "cd '$exec_dir' && PORT=$port $svc_cmd" Enter
+        # Send command to the service pane with all env vars
+        tmux send-keys -t "${tmux_session}:${window_name}.${pane_idx}" "cd '$exec_dir' && $env_string $svc_cmd" Enter
     else
         # No pane configured, create a new window for the service
         tmux new-window -t "$tmux_session" -n "${window_name}-${service_name}" -c "$exec_dir"
-        tmux send-keys -t "${tmux_session}:${window_name}-${service_name}" "PORT=$port $svc_cmd" Enter
+        tmux send-keys -t "${tmux_session}:${window_name}-${service_name}" "$env_string $svc_cmd" Enter
     fi
 
     # Update state (we don't have PID directly since it's in tmux)
