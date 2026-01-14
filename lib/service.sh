@@ -2,6 +2,12 @@
 # lib/service.sh - Service lifecycle management
 
 # Find the pane index for a service in the config
+# Pane mapping for services-top layout with 5 panes (tmux renumbers by visual position):
+#   config 0 (service 1) -> tmux pane 0 (top-left)
+#   config 1 (service 2) -> tmux pane 1 (top-middle)
+#   config 2 (service 3) -> tmux pane 2 (top-right)
+#   config 3 (claude)    -> tmux pane 3 (bottom-left)
+#   config 4 (orchestr)  -> tmux pane 4 (bottom-right)
 find_service_pane_index() {
     local config_file="$1"
     local service_name="$2"
@@ -11,15 +17,17 @@ find_service_pane_index() {
 
     log_debug "find_service_pane_index: service=$service_name pane_count=$pane_count"
 
+    # Pane mapping: config_index -> tmux_pane (sequential due to visual renumbering)
+    local -a pane_map=(0 1 2 3 4)
+
     for ((p = 0; p < pane_count; p++)); do
         local pane_service
         pane_service=$(yq -r ".tmux.windows[0].panes[$p].service // \"\"" "$config_file" 2>/dev/null)
 
         if [[ "$pane_service" == "$service_name" ]]; then
-            # Config index matches tmux pane index directly
-            # Layout: panes 0,1,2 = top row services, pane 3 = bottom (claude)
-            log_debug "find_service_pane_index: found $service_name at pane $p"
-            echo "$p"
+            local tmux_pane="${pane_map[$p]}"
+            log_debug "find_service_pane_index: found $service_name at config $p -> tmux pane $tmux_pane"
+            echo "$tmux_pane"
             return 0
         fi
     done

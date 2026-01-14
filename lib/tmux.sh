@@ -102,12 +102,7 @@ setup_window_panes_for_worktree() {
     configure_window_panes "$session" "$window" "$config_file" "$pane_count" "$root_dir"
 }
 
-# Custom layout for worktree window: services on top, main pane on bottom
-# +----------+----------+----------+
-# | service1 | service2 | service3 |  <- 35% height
-# +----------+----------+----------+
-# |       claude (full width)      |  <- 65% height
-# +--------------------------------+
+# Wrapper for worktree window layout - delegates to setup_services_top_layout with win_idx=0
 setup_services_top_layout_window() {
     local session="$1"
     local window="$2"
@@ -115,30 +110,8 @@ setup_services_top_layout_window() {
     local config_file="$4"
     local pane_count="$5"
 
-    local service_count=$((pane_count - 1))
-
-    # Start with pane 0 (the initial pane)
-    # First, split vertically: top stays as pane 0, bottom becomes last pane
-    tmux split-window -t "${session}:${window}.0" -v -p 65
-
-    # Now pane 0 is top (35%), pane 1 is bottom (65%)
-    # Split pane 0 horizontally for each additional service
-    for ((s = 1; s < service_count; s++)); do
-        tmux split-window -t "${session}:${window}.0" -h -p $((100 / (service_count - s + 1)))
-    done
-
-    # After splits, panes are: 0,1,2 = services (top row), 3 = bottom (claude)
-    # But pane indices may have shifted. Let's use even-horizontal on top row only.
-    # Unfortunately tmux doesn't support partial layouts easily, so we manually size.
-
-    # Select pane 0 and apply even-horizontal to just the top panes
-    # This is tricky - instead let's just accept the split percentages above
-
-    # Configure panes with their directories and commands
-    configure_window_panes "$session" "$window" "$config_file" "$pane_count" "$root_dir"
-
-    # Select bottom pane (claude)
-    tmux select-pane -t "${session}:${window}.$((pane_count - 1))"
+    # Delegate to the main function with win_idx=0
+    setup_services_top_layout "$session" "$window" "$root_dir" "$config_file" "0" "$pane_count"
 }
 
 # Configure panes in a window
@@ -275,12 +248,12 @@ setup_window_panes() {
     configure_panes "$session" "$window" "$config_file" "$win_idx" "$pane_count" "$root_dir"
 }
 
-# Custom layout: services on top (vertical), main pane on bottom (full-width)
+# Custom layout: services on top, main panes on bottom
 # +----------+----------+----------+
-# | service1 | service2 | service3 |
+# | service1 | service2 | service3 |  <- 35% height
 # +----------+----------+----------+
-# |       main pane (full width)   |
-# +--------------------------------+
+# |     claude (80%)     |  wt(20%)|  <- 65% height
+# +----------------------+---------+
 setup_services_top_layout() {
     local session="$1"
     local window="$2"
@@ -289,64 +262,86 @@ setup_services_top_layout() {
     local win_idx="$5"
     local pane_count="$6"
 
-    local service_count=$((pane_count - 1))
-
-    # First, split vertically: top (35%) for services, bottom (65%) for main pane
-    tmux split-window -t "${session}:${window}.0" -v -p 65
-
-    # Now pane 0 is top, pane 1 is bottom
-    # Split top pane horizontally for each additional service with equal widths
-    for ((s = 1; s < service_count; s++)); do
-        tmux split-window -t "${session}:${window}.0" -h -p $((100 / (service_count - s + 1)))
+    # Count how many service panes
+    local service_count=0
+    for ((i = 0; i < pane_count; i++)); do
+        local svc
+        svc=$(yq -r ".tmux.windows[$win_idx].panes[$i].service // \"\"" "$config_file" 2>/dev/null)
+        if [[ -n "$svc" ]] && [[ "$svc" != "null" ]]; then
+            ((service_count++))
+        fi
     done
 
-    # Configure each pane - indices match config order: 0,1,2 = top row, 3 = bottom
+    # Split sequence - tmux renumbers panes visually after each split!
+    # We must account for this when targeting panes.
+
+    # Split 1: vertical split - creates bottom pane (65%)
+    # After: pane 0 = top, pane 1 = bottom
+    tmux split-window -t "${session}:${window}.0" -v -p 65
+
+    # Split 2: horizontal split of top (pane 0) for service 2
+    # After visual renumber: pane 0 = top-left, pane 1 = top-right, pane 2 = bottom
+    if [[ $service_count -ge 2 ]]; then
+        tmux split-window -t "${session}:${window}.0" -h -p 66
+    fi
+
+    # Split 3: split top-right (now pane 1 after renumber) for service 3
+    # After visual renumber: pane 0 = top-left, pane 1 = top-middle, pane 2 = top-right, pane 3 = bottom
+    if [[ $service_count -ge 3 ]]; then
+        tmux split-window -t "${session}:${window}.1" -h -p 50
+    fi
+
+    # Split 4: split bottom (now pane 3 after renumber) for orchestrator (20%)
+    # After: pane 0-2 = top row, pane 3 = bottom-left, pane 4 = bottom-right
+    if [[ $pane_count -gt 4 ]]; then
+        tmux split-window -t "${session}:${window}.3" -h -p 20
+    fi
+
+    # Pane mapping after splits (tmux renumbers by visual position: left-to-right, top-to-bottom):
+    # Pane 0 = top-left (config 0 = service 1)
+    # Pane 1 = top-middle (config 1 = service 2)
+    # Pane 2 = top-right (config 2 = service 3)
+    # Pane 3 = bottom-left (config 3 = claude)
+    # Pane 4 = bottom-right (config 4 = orchestrator)
+
+    # Build mapping array: config_index -> tmux_pane (sequential due to visual renumbering)
+    local -a pane_map=(0 1 2 3 4)
+
+    # Configure each pane
     for ((p = 0; p < pane_count; p++)); do
+        local tmux_pane="${pane_map[$p]}"
+
         local pane_config
         pane_config=$(yq ".tmux.windows[$win_idx].panes[$p]" "$config_file" 2>/dev/null)
 
-        local pane_type
-        pane_type=$(echo "$pane_config" | yq 'type' 2>/dev/null)
-
         local pane_service=""
         local pane_cmd=""
-
-        if [[ "$pane_type" == "\"string\"" ]]; then
-            pane_cmd=$(echo "$pane_config" | yq -r '.' 2>/dev/null)
-        else
-            pane_service=$(echo "$pane_config" | yq -r '.service // ""' 2>/dev/null)
-            pane_cmd=$(echo "$pane_config" | yq -r '.command // ""' 2>/dev/null)
-        fi
+        pane_service=$(echo "$pane_config" | yq -r '.service // ""' 2>/dev/null)
+        pane_cmd=$(echo "$pane_config" | yq -r '.command // ""' 2>/dev/null)
 
         if [[ -n "$pane_service" ]] && [[ "$pane_service" != "null" ]]; then
-            # Get service working directory
             local svc_working_dir
             svc_working_dir=$(yq -r ".services[] | select(.name == \"$pane_service\") | .working_dir // \"\"" "$config_file" 2>/dev/null)
 
-            # CD to service directory if configured
             if [[ -n "$svc_working_dir" ]] && [[ "$svc_working_dir" != "null" ]] && [[ -n "$root_dir" ]]; then
-                tmux send-keys -t "${session}:${window}.${p}" "cd '$root_dir/$svc_working_dir'" Enter
+                tmux send-keys -t "${session}:${window}.${tmux_pane}" "cd '$root_dir/$svc_working_dir'" Enter
             fi
-            tmux send-keys -t "${session}:${window}.${p}" "# Service: $pane_service (use 'wt start' to run)" Enter
+            tmux send-keys -t "${session}:${window}.${tmux_pane}" "# Service: $pane_service (use 'wt start' to run)" Enter
         elif [[ -n "$pane_cmd" ]] && [[ "$pane_cmd" != "null" ]] && [[ "$pane_cmd" != "" ]]; then
-            # Get optional working_dir for command pane, default to worktree root
-            local cmd_working_dir
-            cmd_working_dir=$(echo "$pane_config" | yq -r '.working_dir // ""' 2>/dev/null)
-
-            # CD to working directory (or root if not specified)
             if [[ -n "$root_dir" ]]; then
-                if [[ -n "$cmd_working_dir" ]] && [[ "$cmd_working_dir" != "null" ]] && [[ "$cmd_working_dir" != "." ]]; then
-                    tmux send-keys -t "${session}:${window}.${p}" "cd '$root_dir/$cmd_working_dir'" Enter
-                else
-                    tmux send-keys -t "${session}:${window}.${p}" "cd '$root_dir'" Enter
-                fi
+                tmux send-keys -t "${session}:${window}.${tmux_pane}" "cd '$root_dir'" Enter
             fi
-            tmux send-keys -t "${session}:${window}.${p}" "$pane_cmd" Enter
+            tmux send-keys -t "${session}:${window}.${tmux_pane}" "$pane_cmd" Enter
+        else
+            # Empty command pane (orchestrator)
+            if [[ -n "$root_dir" ]]; then
+                tmux send-keys -t "${session}:${window}.${tmux_pane}" "cd '$root_dir'" Enter
+            fi
         fi
     done
 
-    # Select the bottom pane (claude) as active
-    tmux select-pane -t "${session}:${window}.$((pane_count - 1))"
+    # Select claude pane (pane 3 = bottom-left) as active
+    tmux select-pane -t "${session}:${window}.3"
 }
 
 # Configure panes with commands/services
