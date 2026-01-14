@@ -300,9 +300,7 @@ setup_services_top_layout() {
         tmux split-window -t "${session}:${window}.0" -h -p $((100 / (service_count - s + 1)))
     done
 
-    # Configure each pane
-    # After our splits: panes 0,1,2 are services (top), pane 3 is bottom (claude)
-    # But tmux renumbers, so let's configure by iterating
+    # Configure each pane - indices match config order: 0,1,2 = top row, 3 = bottom
     for ((p = 0; p < pane_count; p++)); do
         local pane_config
         pane_config=$(yq ".tmux.windows[$win_idx].panes[$p]" "$config_file" 2>/dev/null)

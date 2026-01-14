@@ -9,11 +9,16 @@ find_service_pane_index() {
     local pane_count
     pane_count=$(yaml_array_length "$config_file" ".tmux.windows[0].panes")
 
+    log_debug "find_service_pane_index: service=$service_name pane_count=$pane_count"
+
     for ((p = 0; p < pane_count; p++)); do
         local pane_service
         pane_service=$(yq -r ".tmux.windows[0].panes[$p].service // \"\"" "$config_file" 2>/dev/null)
 
         if [[ "$pane_service" == "$service_name" ]]; then
+            # Config index matches tmux pane index directly
+            # Layout: panes 0,1,2 = top row services, pane 3 = bottom (claude)
+            log_debug "find_service_pane_index: found $service_name at pane $p"
             echo "$p"
             return 0
         fi
@@ -98,23 +103,28 @@ start_service() {
         export "$key=$value"
     done <<< "$svc_env"
 
-    # Run pre_start commands
+    # Build exec_dir early so pre_start can use it
+    local exec_dir="$worktree_path/$svc_dir"
+
+    # Run pre_start commands in the service's working directory
     local pre_start
     pre_start=$(yq -r ".services[] | select(.name == \"$service_name\") | .pre_start // [] | .[]" "$config_file" 2>/dev/null)
 
-    while read -r cmd; do
-        [[ -z "$cmd" ]] && continue
-        log_debug "Pre-start: $cmd"
-        eval "$cmd" 2>/dev/null || true
-    done <<< "$pre_start"
+    if [[ -n "$pre_start" ]]; then
+        pushd "$exec_dir" > /dev/null 2>&1 || true
+        while read -r cmd; do
+            [[ -z "$cmd" ]] && continue
+            log_debug "Pre-start ($svc_dir): $cmd"
+            eval "$cmd" 2>/dev/null || true
+        done <<< "$pre_start"
+        popd > /dev/null 2>&1 || true
+    fi
 
     # Get tmux session and window
     local tmux_session
     tmux_session=$(get_tmux_session_name "$config_file")
     local window_name
     window_name=$(get_session_name "$project" "$branch")
-
-    local exec_dir="$worktree_path/$svc_dir"
 
     log_info "Starting $service_name on port $port..."
 
