@@ -72,6 +72,10 @@ wt delete feature/my-feature
 
 Configs live in `~/.config/wt/projects/<name>.yaml`
 
+For complete configuration reference, see **[docs/configuration.md](docs/configuration.md)**.
+
+### Quick Example
+
 ```yaml
 name: my-project
 repo_path: ~/code/my-project
@@ -92,21 +96,31 @@ setup:
   - name: install-deps
     command: npm install
     working_dir: "."
+    on_failure: abort
 
 services:
   - name: frontend
     command: npm run dev
     working_dir: frontend
     port_key: frontend
+    health_check:
+      type: tcp
+      port: "${PORT}"
+      timeout: 60
 
 tmux:
-  layout: services-top  # custom layout: services on top, main pane bottom
+  layout: services-top  # services on top row, main panes on bottom
   windows:
     - name: dev
       panes:
         - service: frontend
         - service: backend
-        - command: claude  # bottom pane
+        - command: claude
+        - command: ""  # orchestrator pane
+
+hooks:
+  post_start: |
+    echo "App running at http://localhost:${PORT_FRONTEND}"
 ```
 
 ## Port Allocation
