@@ -7,7 +7,7 @@ cmd_start() {
     local all=0
     local attach=0
     local project=""
-    local positional=""
+    local -a positionals=()
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -46,10 +46,8 @@ cmd_start() {
                 return 1
                 ;;
             *)
-                # Collect positional argument
-                if [[ -z "$positional" ]]; then
-                    positional="$1"
-                fi
+                # Collect positional arguments
+                positionals+=("$1")
                 shift
                 ;;
         esac
@@ -59,17 +57,28 @@ cmd_start() {
     local detected_branch
     detected_branch=$(detect_worktree_branch)
 
-    # Interpret positional argument based on context
+    # Interpret positional arguments based on context
+    local -a services=()
     if [[ -n "$detected_branch" ]]; then
-        # We're in a worktree - positional arg is the service name
+        # We're in a worktree - positional args are service names
         branch="$detected_branch"
-        if [[ -n "$positional" ]] && [[ -z "$service" ]]; then
-            service="$positional"
+        if [[ ${#positionals[@]} -gt 0 ]] && [[ -z "$service" ]]; then
+            services=("${positionals[@]}")
+        elif [[ -n "$service" ]]; then
+            services=("$service")
         fi
         log_debug "In worktree, detected branch: $branch"
     else
-        # Not in a worktree - positional arg is the branch name
-        branch="$positional"
+        # Not in a worktree - first positional is branch, rest could be services
+        if [[ ${#positionals[@]} -gt 0 ]]; then
+            branch="${positionals[0]}"
+            # If there are more positionals, they're service names
+            if [[ ${#positionals[@]} -gt 1 ]]; then
+                services=("${positionals[@]:1}")
+            elif [[ -n "$service" ]]; then
+                services=("$service")
+            fi
+        fi
         if [[ -z "$branch" ]]; then
             log_error "Branch name is required (not in a worktree)"
             show_start_help
@@ -119,12 +128,25 @@ cmd_start() {
     cleanup_stale_services "$project" "$branch"
 
     # Start services
+    local failed=0
     if [[ "$all" -eq 1 ]]; then
         start_all_services "$project" "$branch" "$PROJECT_CONFIG_FILE"
-    elif [[ -n "$service" ]]; then
-        start_service "$project" "$branch" "$service" "$PROJECT_CONFIG_FILE"
+    elif [[ ${#services[@]} -gt 0 ]]; then
+        # Start multiple services sequentially
+        for svc in "${services[@]}"; do
+            if ! start_service "$project" "$branch" "$svc" "$PROJECT_CONFIG_FILE"; then
+                ((failed++))
+            fi
+            # Small delay between service starts if more than one
+            if [[ ${#services[@]} -gt 1 ]]; then
+                sleep 1
+            fi
+        done
+        if [[ "$failed" -gt 0 ]]; then
+            log_warn "$failed service(s) failed to start"
+        fi
     else
-        log_error "Specify a service name, --all, or --service <name>"
+        log_error "Specify service name(s), --all, or --service <name>"
         show_start_help
         return 1
     fi
@@ -146,30 +168,31 @@ cmd_start() {
 
 show_start_help() {
     cat << 'EOF'
-Usage: wt start [service] [options]
-       wt start <branch> --service <name> [options]
-       wt start <branch> --all [options]
+Usage: wt start [service...] [options]
+       wt start <branch> [service...] [options]
+       wt start --all [options]
 
 Start services in a worktree.
 
-When run inside a worktree, the branch is auto-detected and the first
-argument is treated as the service name.
+When run inside a worktree, the branch is auto-detected and positional
+arguments are treated as service names. Multiple services can be
+specified and will be started sequentially.
 
 Arguments:
-  <service>         Service name (when inside a worktree)
-  <branch>          Branch name (when outside a worktree)
+  <service...>      One or more service names
+  <branch>          Branch name (required when outside a worktree)
 
 Options:
-  -s, --service     Start a specific service
+  -s, --service     Start a specific service (alternative syntax)
   -a, --all         Start all configured services
   --attach          Attach to tmux session after starting
   -p, --project     Project name (auto-detected if not specified)
   -h, --help        Show this help message
 
 Examples:
-  wt start api-server              # Inside worktree: start specific service
-  wt start --all                   # Inside worktree: start all services
+  wt start api-server              # Start one service
+  wt start api-server indexer      # Start multiple services sequentially
+  wt start --all                   # Start all services
   wt start feature/auth --all      # Outside worktree: specify branch
-  wt start feature/auth --service api-server
 EOF
 }

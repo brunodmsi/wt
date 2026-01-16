@@ -6,7 +6,7 @@ cmd_stop() {
     local service=""
     local all=0
     local project=""
-    local positional=""
+    local -a positionals=()
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -35,10 +35,8 @@ cmd_stop() {
                 return 1
                 ;;
             *)
-                # Collect positional argument
-                if [[ -z "$positional" ]]; then
-                    positional="$1"
-                fi
+                # Collect positional arguments
+                positionals+=("$1")
                 shift
                 ;;
         esac
@@ -48,17 +46,28 @@ cmd_stop() {
     local detected_branch
     detected_branch=$(detect_worktree_branch)
 
-    # Interpret positional argument based on context
+    # Interpret positional arguments based on context
+    local -a services=()
     if [[ -n "$detected_branch" ]]; then
-        # We're in a worktree - positional arg is the service name
+        # We're in a worktree - positional args are service names
         branch="$detected_branch"
-        if [[ -n "$positional" ]] && [[ -z "$service" ]]; then
-            service="$positional"
+        if [[ ${#positionals[@]} -gt 0 ]] && [[ -z "$service" ]]; then
+            services=("${positionals[@]}")
+        elif [[ -n "$service" ]]; then
+            services=("$service")
         fi
         log_debug "In worktree, detected branch: $branch"
     else
-        # Not in a worktree - positional arg is the branch name
-        branch="$positional"
+        # Not in a worktree - first positional is branch, rest could be services
+        if [[ ${#positionals[@]} -gt 0 ]]; then
+            branch="${positionals[0]}"
+            # If there are more positionals, they're service names
+            if [[ ${#positionals[@]} -gt 1 ]]; then
+                services=("${positionals[@]:1}")
+            elif [[ -n "$service" ]]; then
+                services=("$service")
+            fi
+        fi
         if [[ -z "$branch" ]]; then
             log_error "Branch name is required (not in a worktree)"
             show_stop_help
@@ -80,10 +89,13 @@ cmd_stop() {
     # Stop services
     if [[ "$all" -eq 1 ]]; then
         stop_all_services "$project" "$branch" "$PROJECT_CONFIG_FILE"
-    elif [[ -n "$service" ]]; then
-        stop_service "$project" "$branch" "$service" "$PROJECT_CONFIG_FILE"
+    elif [[ ${#services[@]} -gt 0 ]]; then
+        # Stop multiple services
+        for svc in "${services[@]}"; do
+            stop_service "$project" "$branch" "$svc" "$PROJECT_CONFIG_FILE"
+        done
     else
-        log_error "Specify a service name, --all, or --service <name>"
+        log_error "Specify service name(s), --all, or --service <name>"
         show_stop_help
         return 1
     fi
@@ -91,29 +103,30 @@ cmd_stop() {
 
 show_stop_help() {
     cat << 'EOF'
-Usage: wt stop [service] [options]
-       wt stop <branch> --service <name> [options]
-       wt stop <branch> --all [options]
+Usage: wt stop [service...] [options]
+       wt stop <branch> [service...] [options]
+       wt stop --all [options]
 
 Stop services in a worktree.
 
-When run inside a worktree, the branch is auto-detected and the first
-argument is treated as the service name.
+When run inside a worktree, the branch is auto-detected and positional
+arguments are treated as service names. Multiple services can be
+specified.
 
 Arguments:
-  <service>         Service name (when inside a worktree)
-  <branch>          Branch name (when outside a worktree)
+  <service...>      One or more service names
+  <branch>          Branch name (required when outside a worktree)
 
 Options:
-  -s, --service     Stop a specific service
+  -s, --service     Stop a specific service (alternative syntax)
   -a, --all         Stop all services
   -p, --project     Project name (auto-detected if not specified)
   -h, --help        Show this help message
 
 Examples:
-  wt stop api-server               # Inside worktree: stop specific service
-  wt stop --all                    # Inside worktree: stop all services
+  wt stop api-server               # Stop one service
+  wt stop api-server indexer       # Stop multiple services
+  wt stop --all                    # Stop all services
   wt stop feature/auth --all       # Outside worktree: specify branch
-  wt stop feature/auth --service api-server
 EOF
 }
