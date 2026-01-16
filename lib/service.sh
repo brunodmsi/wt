@@ -79,7 +79,7 @@ start_service() {
     log_debug "Getting port for service=$service_name port_key=$port_key branch=$branch slot=$slot"
 
     local port
-    port=$(get_service_port "$port_key" "$branch" "$config_file" "$slot")
+    port=$(get_service_port "$port_key" "$branch" "$config_file" "$slot" "$project")
 
     log_debug "Got port=$port for $service_name"
 
@@ -99,7 +99,7 @@ start_service() {
 
     # Export port variables (for local use and variable expansion)
     export PORT="$port"
-    export_port_vars "$branch" "$config_file" "$slot"
+    export_port_vars "$branch" "$config_file" "$slot" "$project"
 
     # Build environment string for tmux command
     # Start with PORT
@@ -360,7 +360,7 @@ list_services_status() {
         port_key=$(get_service_by_index "$config_file" "$i" "port_key")
 
         local port
-        port=$(get_service_port "$port_key" "$branch" "$config_file" "$slot")
+        port=$(get_service_port "$port_key" "$branch" "$config_file" "$slot" "$project")
 
         local status
         status=$(get_service_status "$project" "$branch" "$name")

@@ -287,3 +287,87 @@ get_worktree_slot() {
 
     get_worktree_state "$project" "$branch" "slot"
 }
+
+# Set a port override for a service in a worktree
+set_port_override() {
+    local project="$1"
+    local branch="$2"
+    local service="$3"
+    local port="$4"
+
+    init_state_file "$project"
+    local file
+    file=$(state_file "$project")
+
+    local sanitized
+    sanitized=$(sanitize_branch_name "$branch")
+
+    yq -i ".worktrees.\"$sanitized\".port_overrides.\"$service\" = $port" "$file"
+    log_debug "Set port override for $service: $port"
+}
+
+# Get a port override for a service in a worktree
+get_port_override() {
+    local project="$1"
+    local branch="$2"
+    local service="$3"
+
+    local file
+    file=$(state_file "$project")
+
+    if [[ ! -f "$file" ]]; then
+        echo ""
+        return
+    fi
+
+    local sanitized
+    sanitized=$(sanitize_branch_name "$branch")
+
+    local override
+    override=$(yaml_get "$file" ".worktrees.\"$sanitized\".port_overrides.\"$service\"" "")
+
+    # Return empty if null or not set
+    if [[ "$override" == "null" ]] || [[ -z "$override" ]]; then
+        echo ""
+    else
+        echo "$override"
+    fi
+}
+
+# Clear a port override for a service
+clear_port_override() {
+    local project="$1"
+    local branch="$2"
+    local service="$3"
+
+    local file
+    file=$(state_file "$project")
+
+    if [[ ! -f "$file" ]]; then
+        return
+    fi
+
+    local sanitized
+    sanitized=$(sanitize_branch_name "$branch")
+
+    yq -i "del(.worktrees.\"$sanitized\".port_overrides.\"$service\")" "$file"
+    log_debug "Cleared port override for $service"
+}
+
+# List all port overrides for a worktree
+list_port_overrides() {
+    local project="$1"
+    local branch="$2"
+
+    local file
+    file=$(state_file "$project")
+
+    if [[ ! -f "$file" ]]; then
+        return
+    fi
+
+    local sanitized
+    sanitized=$(sanitize_branch_name "$branch")
+
+    yq -r ".worktrees.\"$sanitized\".port_overrides // {} | to_entries | .[] | \"\(.key):\(.value)\"" "$file" 2>/dev/null
+}

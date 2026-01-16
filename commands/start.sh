@@ -7,6 +7,7 @@ cmd_start() {
     local all=0
     local attach=0
     local project=""
+    local positional=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -45,23 +46,35 @@ cmd_start() {
                 return 1
                 ;;
             *)
-                if [[ -z "$branch" ]]; then
-                    branch="$1"
+                # Collect positional argument
+                if [[ -z "$positional" ]]; then
+                    positional="$1"
                 fi
                 shift
                 ;;
         esac
     done
 
-    # If no branch specified, try to detect from current directory
-    if [[ -z "$branch" ]]; then
-        branch=$(detect_worktree_branch)
+    # Try to detect branch from current directory
+    local detected_branch
+    detected_branch=$(detect_worktree_branch)
+
+    # Interpret positional argument based on context
+    if [[ -n "$detected_branch" ]]; then
+        # We're in a worktree - positional arg is the service name
+        branch="$detected_branch"
+        if [[ -n "$positional" ]] && [[ -z "$service" ]]; then
+            service="$positional"
+        fi
+        log_debug "In worktree, detected branch: $branch"
+    else
+        # Not in a worktree - positional arg is the branch name
+        branch="$positional"
         if [[ -z "$branch" ]]; then
-            log_error "Branch name is required"
+            log_error "Branch name is required (not in a worktree)"
             show_start_help
             return 1
         fi
-        log_info "Detected worktree branch: $branch"
     fi
 
     # Detect or validate project
@@ -111,7 +124,7 @@ cmd_start() {
     elif [[ -n "$service" ]]; then
         start_service "$project" "$branch" "$service" "$PROJECT_CONFIG_FILE"
     else
-        log_error "Specify --all or --service <name>"
+        log_error "Specify a service name, --all, or --service <name>"
         show_start_help
         return 1
     fi
@@ -133,12 +146,18 @@ cmd_start() {
 
 show_start_help() {
     cat << 'EOF'
-Usage: wt start <branch> [options]
+Usage: wt start [service] [options]
+       wt start <branch> --service <name> [options]
+       wt start <branch> --all [options]
 
 Start services in a worktree.
 
+When run inside a worktree, the branch is auto-detected and the first
+argument is treated as the service name.
+
 Arguments:
-  <branch>          Branch name of the worktree
+  <service>         Service name (when inside a worktree)
+  <branch>          Branch name (when outside a worktree)
 
 Options:
   -s, --service     Start a specific service
@@ -148,8 +167,9 @@ Options:
   -h, --help        Show this help message
 
 Examples:
-  wt start feature/auth --all
-  wt start feature/auth --service gap-app-v2
-  wt start feature/auth --all --attach
+  wt start api-server              # Inside worktree: start specific service
+  wt start --all                   # Inside worktree: start all services
+  wt start feature/auth --all      # Outside worktree: specify branch
+  wt start feature/auth --service api-server
 EOF
 }

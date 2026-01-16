@@ -69,29 +69,55 @@ calculate_worktree_ports() {
 }
 
 # Export port environment variables for all services
+# If project is provided, port overrides are applied
 export_port_vars() {
     local branch="$1"
     local config_file="$2"
     local slot="$3"
+    local project="${4:-}"
     local svc_name svc_port  # Declare loop vars local to avoid clobbering caller's vars
 
     while IFS=: read -r svc_name svc_port; do
         [[ -z "$svc_name" ]] && continue
 
+        # Check for port override if project is provided
+        local effective_port="$svc_port"
+        if [[ -n "$project" ]]; then
+            local override
+            override=$(get_port_override "$project" "$branch" "$svc_name")
+            if [[ -n "$override" ]]; then
+                effective_port="$override"
+                log_debug "Using port override for $svc_name: $override"
+            fi
+        fi
+
         # Export PORT_<SERVICE_NAME> (uppercase, dashes to underscores)
         local var_name
         var_name="PORT_$(echo "$svc_name" | tr '[:lower:]-' '[:upper:]_')"
-        export "$var_name=$svc_port"
-        log_debug "Exported port: $var_name=$svc_port"
+        export "$var_name=$effective_port"
+        log_debug "Exported port: $var_name=$effective_port"
     done < <(calculate_worktree_ports "$branch" "$config_file" "$slot")
 }
 
 # Get port for a specific service
+# If project is provided, checks for port overrides first
 get_service_port() {
     local service="$1"
     local branch="$2"
     local config_file="$3"
     local slot="$4"
+    local project="${5:-}"
+
+    # Check for port override if project is provided
+    if [[ -n "$project" ]]; then
+        local override
+        override=$(get_port_override "$project" "$branch" "$service")
+        if [[ -n "$override" ]]; then
+            log_debug "Using port override for $service: $override"
+            echo "$override"
+            return 0
+        fi
+    fi
 
     calculate_worktree_ports "$branch" "$config_file" "$slot" | grep "^$service:" | cut -d: -f2
 }
