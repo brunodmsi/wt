@@ -73,7 +73,7 @@ cmd_attach() {
             log_info "Window not found, creating..."
             local wt_path
             wt_path=$(get_worktree_path "$project" "$branch")
-            create_session "$window_name" "$wt_path" "$PROJECT_CONFIG_FILE"
+            create_session "$window_name" "$wt_path" "$PROJECT_CONFIG_FILE" "$window"
         else
             die "No worktree found for branch: $branch"
         fi
@@ -93,12 +93,12 @@ Arguments:
   <branch>          Branch name of the worktree
 
 Options:
-  -w, --window      Select a specific window
+  -w, --window      Create window at specific index (moves existing if occupied)
   -p, --project     Project name (auto-detected if not specified)
   -h, --help        Show this help message
 
 Examples:
   wt attach feature/auth
-  wt attach feature/auth --window servers
+  wt attach feature/auth -w 2    # Create at window index 2
 EOF
 }

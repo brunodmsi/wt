@@ -24,6 +24,23 @@ window_exists() {
     tmux list-windows -t "$session" -F "#{window_name}" 2>/dev/null | grep -q "^${window}$"
 }
 
+# Get next available window index in a session
+get_next_available_window_index() {
+    local session="$1"
+    local used_indices
+    used_indices=$(tmux list-windows -t "$session" -F "#{window_index}" 2>/dev/null | sort -n)
+
+    local next=0
+    for idx in $used_indices; do
+        if [[ "$idx" -eq "$next" ]]; then
+            ((next++))
+        else
+            break
+        fi
+    done
+    echo "$next"
+}
+
 # Get session name from config or default
 get_tmux_session_name() {
     local config_file="$1"
@@ -38,6 +55,7 @@ create_session() {
     local window_name="$1"  # This is now the window name (branch)
     local root_dir="$2"
     local config_file="$3"
+    local window_index="${4:-}"  # Optional: specific window index
 
     ensure_tmux
 
@@ -48,7 +66,15 @@ create_session() {
     # Create session if it doesn't exist
     if ! session_exists "$session"; then
         log_info "Creating tmux session: $session"
-        tmux new-session -d -s "$session" -c "$root_dir" -n "$window_name"
+        if [[ -n "$window_index" ]]; then
+            tmux new-session -d -s "$session" -c "$root_dir" -n "$window_name"
+            # Move window to requested index if not 0
+            if [[ "$window_index" != "0" ]]; then
+                tmux move-window -s "${session}:0" -t "${session}:${window_index}"
+            fi
+        else
+            tmux new-session -d -s "$session" -c "$root_dir" -n "$window_name"
+        fi
     else
         # Session exists, check if window already exists
         if window_exists "$session" "$window_name"; then
@@ -57,7 +83,27 @@ create_session() {
         fi
         # Add new window to existing session
         log_info "Adding window '$window_name' to session '$session'"
-        tmux new-window -t "$session" -n "$window_name" -c "$root_dir"
+
+        if [[ -n "$window_index" ]]; then
+            # Check if requested index is occupied
+            if tmux list-windows -t "$session" -F "#{window_index}" | grep -q "^${window_index}$"; then
+                log_info "Window index $window_index is occupied, moving existing window..."
+                # Find next available index
+                local next_index
+                next_index=$(get_next_available_window_index "$session")
+                # Move existing window to next available slot
+                tmux move-window -s "${session}:${window_index}" -t "${session}:${next_index}"
+                log_info "Moved existing window from index $window_index to $next_index"
+            fi
+            # Create new window at the requested index
+            tmux new-window -t "${session}:${window_index}" -n "$window_name" -c "$root_dir"
+        else
+            # Find max window index and create at max+1 to avoid conflicts
+            local max_index
+            max_index=$(tmux list-windows -t "$session" -F "#{window_index}" | sort -n | tail -1)
+            local new_index=$((max_index + 1))
+            tmux new-window -t "${session}:${new_index}" -n "$window_name" -c "$root_dir"
+        fi
     fi
 
     # Setup panes in the window from config
