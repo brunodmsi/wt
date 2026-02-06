@@ -58,6 +58,9 @@ cmd_status() {
     # Load project configuration
     load_project_config "$project"
 
+    # Clean up stale worktree entries
+    cleanup_stale_worktrees "$project"
+
     # Check worktree exists
     if ! worktree_exists "$branch" "$PROJECT_REPO_PATH"; then
         die "Worktree not found for branch: $branch"

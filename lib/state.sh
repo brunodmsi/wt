@@ -308,6 +308,32 @@ cleanup_stale_services() {
     done < <(list_service_states "$project" "$branch")
 }
 
+# Clean up stale worktree entries (directories that no longer exist)
+cleanup_stale_worktrees() {
+    local project="$1"
+
+    local file
+    file=$(state_file "$project")
+
+    if [[ ! -f "$file" ]]; then
+        return
+    fi
+
+    local sanitized_branch wt_path
+    while read -r sanitized_branch; do
+        [[ -z "$sanitized_branch" ]] && continue
+
+        wt_path=$(yaml_get "$file" ".worktrees.\"$sanitized_branch\".path" "")
+        if [[ -n "$wt_path" ]] && [[ ! -d "$wt_path" ]]; then
+            local branch
+            branch=$(yaml_get "$file" ".worktrees.\"$sanitized_branch\".branch" "$sanitized_branch")
+            log_warn "Cleaning up stale worktree state: $branch (path $wt_path no longer exists)"
+            release_slot "$project" "$branch" 2>/dev/null || true
+            with_file_lock "$file" yq -i "del(.worktrees.\"$sanitized_branch\")" "$file"
+        fi
+    done < <(list_worktree_states "$project")
+}
+
 # Get tmux window name for a worktree (just the sanitized branch name)
 get_session_name() {
     local project="$1"
