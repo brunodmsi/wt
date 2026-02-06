@@ -98,10 +98,9 @@ create_session() {
             # Create new window at the requested index
             tmux new-window -t "${session}:${window_index}" -n "$window_name" -c "$root_dir"
         else
-            # Find max window index and create at max+1 to avoid conflicts
-            local max_index
-            max_index=$(tmux list-windows -t "$session" -F "#{window_index}" | sort -n | tail -1)
-            local new_index=$((max_index + 1))
+            # Find first available gap in window indices
+            local new_index
+            new_index=$(get_next_available_window_index "$session")
             tmux new-window -t "${session}:${new_index}" -n "$window_name" -c "$root_dir"
         fi
     fi
