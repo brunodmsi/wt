@@ -1,6 +1,51 @@
 #!/bin/bash
 # commands/ports.sh - Show and manage port assignments for worktrees
 
+# Print port table header
+# Usage: _ports_table_header <title> <check_availability>
+_ports_table_header() {
+    local title="$1"
+    local check_availability="$2"
+
+    echo -e "${BOLD}${title}${NC}"
+    printf "%-25s %-8s %-10s" "SERVICE" "PORT" "OVERRIDE"
+    [[ "$check_availability" -eq 1 ]] && printf " %-12s" "STATUS"
+    echo ""
+    printf "%s\n" "$(printf '%.0s-' {1..60})"
+}
+
+# Print a single port row with override and availability info
+# Usage: _ports_table_row <service> <port> <project> <branch> <check_availability>
+_ports_table_row() {
+    local service="$1"
+    local port="$2"
+    local project="$3"
+    local branch="$4"
+    local check_availability="$5"
+
+    local override
+    override=$(get_port_override "$project" "$branch" "$service")
+    local effective_port="$port"
+
+    printf "%-25s %-8s" "$service" "$port"
+
+    if [[ -n "$override" ]]; then
+        printf " ${CYAN}%-10s${NC}" "$override"
+        effective_port="$override"
+    else
+        printf " %-10s" "-"
+    fi
+
+    if [[ "$check_availability" -eq 1 ]]; then
+        if port_in_use "$effective_port"; then
+            printf " ${RED}in use${NC}"
+        else
+            printf " ${GREEN}available${NC}"
+        fi
+    fi
+    echo ""
+}
+
 cmd_ports() {
     local subcommand=""
     local branch=""
@@ -99,39 +144,13 @@ cmd_ports() {
     reserved_services=$(yq -r '.ports.reserved.services // {} | to_entries | .[] | "\(.key):\(.value)"' "$PROJECT_CONFIG_FILE" 2>/dev/null)
 
     if [[ -n "$reserved_services" ]]; then
-        echo -e "${BOLD}Reserved Ports (Slot $slot)${NC}"
-        printf "%-25s %-8s %-10s" "SERVICE" "PORT" "OVERRIDE"
-        [[ "$check_availability" -eq 1 ]] && printf " %-12s" "STATUS"
-        echo ""
-        printf "%s\n" "$(printf '%.0s-' {1..60})"
+        _ports_table_header "Reserved Ports (Slot $slot)" "$check_availability"
 
         while IFS=: read -r service offset; do
             [[ -z "$service" ]] && continue
             local port
             port=$(calculate_reserved_port "$slot" "$offset" "$reserved_min")
-
-            # Check for override
-            local override
-            override=$(get_port_override "$project" "$branch" "$service")
-            local effective_port="$port"
-
-            printf "%-25s %-8s" "$service" "$port"
-
-            if [[ -n "$override" ]]; then
-                printf " ${CYAN}%-10s${NC}" "$override"
-                effective_port="$override"
-            else
-                printf " %-10s" "-"
-            fi
-
-            if [[ "$check_availability" -eq 1 ]]; then
-                if port_in_use "$effective_port"; then
-                    printf " ${RED}in use${NC}"
-                else
-                    printf " ${GREEN}available${NC}"
-                fi
-            fi
-            echo ""
+            _ports_table_row "$service" "$port" "$project" "$branch" "$check_availability"
         done <<< "$reserved_services"
         echo ""
     fi
@@ -141,11 +160,7 @@ cmd_ports() {
     dynamic_services=$(yq -r '.ports.dynamic.services // {} | keys | .[]' "$PROJECT_CONFIG_FILE" 2>/dev/null)
 
     if [[ -n "$dynamic_services" ]]; then
-        echo -e "${BOLD}Dynamic Ports${NC}"
-        printf "%-25s %-8s %-10s" "SERVICE" "PORT" "OVERRIDE"
-        [[ "$check_availability" -eq 1 ]] && printf " %-12s" "STATUS"
-        echo ""
-        printf "%s\n" "$(printf '%.0s-' {1..60})"
+        _ports_table_header "Dynamic Ports" "$check_availability"
 
         local dynamic_min
         dynamic_min=$(yaml_get "$PROJECT_CONFIG_FILE" ".ports.dynamic.range.min" "4000")
@@ -157,29 +172,7 @@ cmd_ports() {
             [[ -z "$service" ]] && continue
             local port
             port=$(calculate_dynamic_port "$branch" "$dynamic_min" "$dynamic_max")
-
-            # Check for override
-            local override
-            override=$(get_port_override "$project" "$branch" "$service")
-            local effective_port="$port"
-
-            printf "%-25s %-8s" "$service" "$port"
-
-            if [[ -n "$override" ]]; then
-                printf " ${CYAN}%-10s${NC}" "$override"
-                effective_port="$override"
-            else
-                printf " %-10s" "-"
-            fi
-
-            if [[ "$check_availability" -eq 1 ]]; then
-                if port_in_use "$effective_port"; then
-                    printf " ${RED}in use${NC}"
-                else
-                    printf " ${GREEN}available${NC}"
-                fi
-            fi
-            echo ""
+            _ports_table_row "$service" "$port" "$project" "$branch" "$check_availability"
         done <<< "$dynamic_services"
         echo ""
     fi
