@@ -158,7 +158,13 @@ remove_worktree() {
     if [[ "$keep_branch" == "0" ]]; then
         if branch_exists "$branch"; then
             log_info "Deleting branch: $branch"
-            git -C "$repo_root" branch -D "$branch" 2>/dev/null || true
+            if [[ "$force" == "1" ]]; then
+                git -C "$repo_root" branch -D "$branch" 2>/dev/null || true
+            else
+                if ! git -C "$repo_root" branch -d "$branch" 2>/dev/null; then
+                    log_warn "Branch '$branch' has unmerged changes. Use --force to delete anyway, or --keep-branch to preserve it."
+                fi
+            fi
         fi
     fi
 
