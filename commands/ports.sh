@@ -316,6 +316,11 @@ cmd_ports_set() {
         return 1
     fi
 
+    # Warn if port is currently in use
+    if ! is_port_available "$port"; then
+        log_warn "Port $port is currently in use. Override will be set, but the service may fail to start until the port is freed."
+    fi
+
     # Set the override
     set_port_override "$project" "$branch" "$service" "$port"
     log_success "Port override set: $service -> $port (branch: $branch)"
