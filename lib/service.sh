@@ -112,7 +112,7 @@ start_service() {
     while IFS='=' read -r key value; do
         [[ -z "$key" ]] && continue
         # Expand variables in value (e.g., ${PORT_GAP_INDEXER})
-        value=$(eval echo "$value" 2>/dev/null || echo "$value")
+        value=$(echo "$value" | envsubst 2>/dev/null || echo "$value")
         # Add to env string for tmux command
         env_string="$env_string $key=$value"
         # Also export locally for pre_start commands
@@ -304,7 +304,7 @@ run_health_check() {
         http)
             local url
             url=$(yq -r ".services[] | select(.name == \"$service_name\") | .health_check.url" "$config_file" 2>/dev/null)
-            url=$(eval echo "$url")
+            url=$(echo "$url" | envsubst 2>/dev/null || echo "$url")
 
             while ! curl -sf "$url" &>/dev/null; do
                 if ((elapsed >= timeout)); then

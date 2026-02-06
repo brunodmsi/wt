@@ -280,7 +280,7 @@ export_env_vars() {
     while IFS='=' read -r key value; do
         [[ -z "$key" ]] && continue
         # Expand any variables in value
-        value=$(eval echo "$value" 2>/dev/null || echo "$value")
+        value=$(echo "$value" | envsubst 2>/dev/null || echo "$value")
         export "$key=$value"
         log_debug "Exported env: $key=$value"
     done < <(get_env_vars "$config_file")

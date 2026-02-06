@@ -75,10 +75,16 @@ execute_setup() {
             continue
         fi
 
-        # Check condition
+        # Check condition (restricted to test/file-check commands)
         if [[ -n "$condition" ]] && [[ "$condition" != "null" ]]; then
-            if ! (cd "$worktree_path" && eval "$condition" &>/dev/null); then
-                log_info "Skipping '$step_name' - condition not met"
+            if [[ "$condition" =~ ^(test |!\ test |\[|\[\[) ]]; then
+                if ! (cd "$worktree_path" && eval "$condition" &>/dev/null); then
+                    log_info "Skipping '$step_name' - condition not met"
+                    skipped+=("$step_name")
+                    continue
+                fi
+            else
+                log_warn "Skipping unsafe condition for '$step_name': only test/[ expressions are allowed"
                 skipped+=("$step_name")
                 continue
             fi
@@ -90,10 +96,10 @@ execute_setup() {
         local step_env
         step_env=$(yq -r ".setup[$i].env // {} | to_entries | .[] | \"\(.key)=\(.value)\"" "$config_file" 2>/dev/null)
 
-        # Export step environment
+        # Export step environment (use envsubst for safe variable expansion)
         while IFS='=' read -r key value; do
             [[ -z "$key" ]] && continue
-            value=$(eval echo "$value" 2>/dev/null || echo "$value")
+            value=$(echo "$value" | envsubst 2>/dev/null || echo "$value")
             export "$key=$value"
         done <<< "$step_env"
 
@@ -192,7 +198,7 @@ run_setup_step() {
 
             while IFS='=' read -r key value; do
                 [[ -z "$key" ]] && continue
-                value=$(eval echo "$value" 2>/dev/null || echo "$value")
+                value=$(echo "$value" | envsubst 2>/dev/null || echo "$value")
                 export "$key=$value"
             done <<< "$step_env"
 
