@@ -38,7 +38,12 @@ calculate_reserved_port() {
     local base="${3:-3000}"
     local services_per_slot="${4:-2}"
 
-    echo $((base + (slot * services_per_slot) + service_offset))
+    local port=$((base + (slot * services_per_slot) + service_offset))
+    if (( port < 1 || port > 65535 )); then
+        log_error "Calculated port $port is out of valid range (1-65535). Check port config and slot count."
+        return 1
+    fi
+    echo "$port"
 }
 
 # Get all ports for a worktree
