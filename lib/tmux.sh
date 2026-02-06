@@ -66,14 +66,14 @@ create_session() {
     # Create session if it doesn't exist
     if ! session_exists "$session"; then
         log_info "Creating tmux session: $session"
-        if [[ -n "$window_index" ]]; then
-            tmux new-session -d -s "$session" -c "$root_dir" -n "$window_name"
-            # Move window to requested index if not 0
-            if [[ "$window_index" != "0" ]]; then
-                tmux move-window -s "${session}:0" -t "${session}:${window_index}"
+        if ! tmux new-session -d -s "$session" -c "$root_dir" -n "$window_name"; then
+            log_error "Failed to create tmux session '$session'. Is tmux available?"
+            return 1
+        fi
+        if [[ -n "$window_index" ]] && [[ "$window_index" != "0" ]]; then
+            if ! tmux move-window -s "${session}:0" -t "${session}:${window_index}"; then
+                log_warn "Failed to move window to index $window_index"
             fi
-        else
-            tmux new-session -d -s "$session" -c "$root_dir" -n "$window_name"
         fi
     else
         # Session exists, check if window already exists
@@ -88,20 +88,25 @@ create_session() {
             # Check if requested index is occupied
             if tmux list-windows -t "$session" -F "#{window_index}" | grep -q "^${window_index}$"; then
                 log_info "Window index $window_index is occupied, moving existing window..."
-                # Find next available index
                 local next_index
                 next_index=$(get_next_available_window_index "$session")
-                # Move existing window to next available slot
-                tmux move-window -s "${session}:${window_index}" -t "${session}:${next_index}"
-                log_info "Moved existing window from index $window_index to $next_index"
+                if ! tmux move-window -s "${session}:${window_index}" -t "${session}:${next_index}"; then
+                    log_warn "Failed to move existing window from index $window_index"
+                else
+                    log_info "Moved existing window from index $window_index to $next_index"
+                fi
             fi
-            # Create new window at the requested index
-            tmux new-window -t "${session}:${window_index}" -n "$window_name" -c "$root_dir"
+            if ! tmux new-window -t "${session}:${window_index}" -n "$window_name" -c "$root_dir"; then
+                log_error "Failed to create window at index $window_index"
+                return 1
+            fi
         else
-            # Find first available gap in window indices
             local new_index
             new_index=$(get_next_available_window_index "$session")
-            tmux new-window -t "${session}:${new_index}" -n "$window_name" -c "$root_dir"
+            if ! tmux new-window -t "${session}:${new_index}" -n "$window_name" -c "$root_dir"; then
+                log_error "Failed to create window '$window_name'"
+                return 1
+            fi
         fi
     fi
 
