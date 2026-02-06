@@ -41,7 +41,7 @@ get_worktree_state() {
     yaml_get "$file" ".worktrees.\"$sanitized\".$field" ""
 }
 
-# Set worktree state
+# Set worktree state (with file locking)
 set_worktree_state() {
     local project="$1"
     local branch="$2"
@@ -55,6 +55,15 @@ set_worktree_state() {
     local sanitized
     sanitized=$(sanitize_branch_name "$branch")
 
+    with_file_lock "$file" _set_worktree_state_locked "$sanitized" "$field" "$value" "$file"
+}
+
+_set_worktree_state_locked() {
+    local sanitized="$1"
+    local field="$2"
+    local value="$3"
+    local file="$4"
+
     if [[ "$value" =~ ^[0-9]+$ ]]; then
         yq -i ".worktrees.\"$sanitized\".$field = $value" "$file"
     else
@@ -62,7 +71,7 @@ set_worktree_state() {
     fi
 }
 
-# Delete worktree state
+# Delete worktree state (with file locking)
 delete_worktree_state() {
     local project="$1"
     local branch="$2"
@@ -77,11 +86,19 @@ delete_worktree_state() {
     local sanitized
     sanitized=$(sanitize_branch_name "$branch")
 
+    with_file_lock "$file" _delete_worktree_state_locked "$sanitized" "$file" "$branch"
+}
+
+_delete_worktree_state_locked() {
+    local sanitized="$1"
+    local file="$2"
+    local branch="$3"
+
     yq -i "del(.worktrees.\"$sanitized\")" "$file"
     log_debug "Deleted state for worktree: $branch"
 }
 
-# Create worktree state entry
+# Create worktree state entry (with file locking)
 create_worktree_state() {
     local project="$1"
     local branch="$2"
@@ -97,6 +114,17 @@ create_worktree_state() {
 
     local ts
     ts=$(timestamp)
+
+    with_file_lock "$file" _create_worktree_state_locked "$sanitized" "$branch" "$path" "$slot" "$ts" "$file"
+}
+
+_create_worktree_state_locked() {
+    local sanitized="$1"
+    local branch="$2"
+    local path="$3"
+    local slot="$4"
+    local ts="$5"
+    local file="$6"
 
     yq -i ".worktrees.\"$sanitized\" = {
         \"branch\": \"$branch\",
@@ -130,7 +158,7 @@ get_service_state() {
     yaml_get "$file" ".worktrees.\"$sanitized\".services.\"$service\".$field" ""
 }
 
-# Set service state
+# Set service state (with file locking)
 set_service_state() {
     local project="$1"
     local branch="$2"
@@ -145,6 +173,16 @@ set_service_state() {
     local sanitized
     sanitized=$(sanitize_branch_name "$branch")
 
+    with_file_lock "$file" _set_service_state_locked "$sanitized" "$service" "$field" "$value" "$file"
+}
+
+_set_service_state_locked() {
+    local sanitized="$1"
+    local service="$2"
+    local field="$3"
+    local value="$4"
+    local file="$5"
+
     if [[ "$value" =~ ^[0-9]+$ ]]; then
         yq -i ".worktrees.\"$sanitized\".services.\"$service\".$field = $value" "$file"
     else
@@ -152,7 +190,7 @@ set_service_state() {
     fi
 }
 
-# Update service status
+# Update service status (with file locking, batched yq)
 update_service_status() {
     local project="$1"
     local branch="$2"
@@ -171,21 +209,37 @@ update_service_status() {
     local ts
     ts=$(timestamp)
 
-    yq -i ".worktrees.\"$sanitized\".services.\"$service\".status = \"$status\"" "$file"
+    with_file_lock "$file" _update_service_status_locked "$sanitized" "$service" "$status" "$pid" "$port" "$ts" "$file"
+}
+
+_update_service_status_locked() {
+    local sanitized="$1"
+    local service="$2"
+    local status="$3"
+    local pid="$4"
+    local port="$5"
+    local ts="$6"
+    local file="$7"
+
+    # Build a single yq expression to batch all updates
+    local base=".worktrees.\"$sanitized\".services.\"$service\""
+    local expr="${base}.status = \"$status\""
 
     if [[ -n "$pid" ]]; then
-        yq -i ".worktrees.\"$sanitized\".services.\"$service\".pid = $pid" "$file"
+        expr="$expr | ${base}.pid = $pid"
     else
-        yq -i ".worktrees.\"$sanitized\".services.\"$service\".pid = null" "$file"
+        expr="$expr | ${base}.pid = null"
     fi
 
     if [[ -n "$port" ]]; then
-        yq -i ".worktrees.\"$sanitized\".services.\"$service\".port = $port" "$file"
+        expr="$expr | ${base}.port = $port"
     fi
 
     if [[ "$status" == "running" ]]; then
-        yq -i ".worktrees.\"$sanitized\".services.\"$service\".started_at = \"$ts\"" "$file"
+        expr="$expr | ${base}.started_at = \"$ts\""
     fi
+
+    yq -i "$expr" "$file"
 }
 
 # List all worktrees for a project
@@ -288,7 +342,7 @@ get_worktree_slot() {
     get_worktree_state "$project" "$branch" "slot"
 }
 
-# Set a port override for a service in a worktree
+# Set a port override for a service in a worktree (with file locking)
 set_port_override() {
     local project="$1"
     local branch="$2"
@@ -301,6 +355,15 @@ set_port_override() {
 
     local sanitized
     sanitized=$(sanitize_branch_name "$branch")
+
+    with_file_lock "$file" _set_port_override_locked "$sanitized" "$service" "$port" "$file"
+}
+
+_set_port_override_locked() {
+    local sanitized="$1"
+    local service="$2"
+    local port="$3"
+    local file="$4"
 
     yq -i ".worktrees.\"$sanitized\".port_overrides.\"$service\" = $port" "$file"
     log_debug "Set port override for $service: $port"
@@ -334,7 +397,7 @@ get_port_override() {
     fi
 }
 
-# Clear a port override for a service
+# Clear a port override for a service (with file locking)
 clear_port_override() {
     local project="$1"
     local branch="$2"
@@ -349,6 +412,14 @@ clear_port_override() {
 
     local sanitized
     sanitized=$(sanitize_branch_name "$branch")
+
+    with_file_lock "$file" _clear_port_override_locked "$sanitized" "$service" "$file"
+}
+
+_clear_port_override_locked() {
+    local sanitized="$1"
+    local service="$2"
+    local file="$3"
 
     yq -i "del(.worktrees.\"$sanitized\".port_overrides.\"$service\")" "$file"
     log_debug "Cleared port override for $service"
