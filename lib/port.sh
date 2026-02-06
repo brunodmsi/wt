@@ -3,16 +3,29 @@
 
 # Calculate dynamic port from branch name hash
 # Uses cksum for deterministic, portable hashing
+# Accepts optional used_ports string (space-separated) to avoid collisions
 calculate_dynamic_port() {
     local branch="$1"
     local port_min="${2:-4000}"
     local port_max="${3:-5000}"
+    local used_ports="${4:-}"
 
     local range=$((port_max - port_min))
     local hash
     hash=$(echo -n "$branch" | cksum | awk '{print $1}')
 
-    echo $((port_min + (hash % range)))
+    local port=$((port_min + (hash % range)))
+
+    # If collision detected, probe linearly for next available port
+    if [[ -n "$used_ports" ]]; then
+        local attempts=0
+        while [[ " $used_ports " == *" $port "* ]] && (( attempts < range )); do
+            port=$(( port_min + ((port - port_min + 1) % range) ))
+            ((attempts++))
+        done
+    fi
+
+    echo "$port"
 }
 
 # Calculate reserved port from slot
@@ -60,10 +73,14 @@ calculate_worktree_ports() {
         echo "$svc_name:$svc_port"
     done <<< "$reserved_services"
 
-    # Output dynamic service ports
+    # Collect ports already assigned (reserved + other worktrees' dynamic ports)
+    local used_dynamic_ports=""
+
+    # Output dynamic service ports (with collision avoidance)
     while read -r svc_name; do
         [[ -z "$svc_name" ]] && continue
-        svc_port=$(calculate_dynamic_port "$branch" "$dynamic_min" "$dynamic_max")
+        svc_port=$(calculate_dynamic_port "$branch" "$dynamic_min" "$dynamic_max" "$used_dynamic_ports")
+        used_dynamic_ports="$used_dynamic_ports $svc_port"
         echo "$svc_name:$svc_port"
     done <<< "$dynamic_services"
 }
