@@ -156,17 +156,29 @@ expand_path() {
 }
 
 # Execute a command while holding an exclusive file lock
+# Uses mkdir for portable atomic locking (works on macOS and Linux)
 # Usage: with_file_lock "/path/to/file" command args...
 with_file_lock() {
-    local lock_file="$1.lock"
+    local lock_dir="$1.lockdir"
     shift
 
-    local fd
-    exec {fd}>"$lock_file"
-    flock -x "$fd"
-    "$@"
-    local rc=$?
-    exec {fd}>&-
+    local max_wait=10
+    local waited=0
+    while ! mkdir "$lock_dir" 2>/dev/null; do
+        if (( waited >= max_wait )); then
+            # Stale lock — force remove and retry
+            rm -rf "$lock_dir"
+            mkdir "$lock_dir" 2>/dev/null || true
+            break
+        fi
+        sleep 0.1
+        waited=$((waited + 1))
+    done
+
+    # Run the command, capture exit code, then release lock
+    local rc=0
+    "$@" || rc=$?
+    rm -rf "$lock_dir"
     return $rc
 }
 
