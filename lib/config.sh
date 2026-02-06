@@ -310,17 +310,21 @@ get_env_vars() {
     yq -r '.env // {} | to_entries | .[] | "\(.key)=\(.value)"' "$config_file" 2>/dev/null
 }
 
+# Export KEY=VALUE lines with variable expansion via envsubst
+# Usage: export_env_string "$key_value_lines"
+export_env_string() {
+    local key value
+    while IFS='=' read -r key value; do
+        [[ -z "$key" ]] && continue
+        value=$(echo "$value" | envsubst 2>/dev/null || echo "$value")
+        export "$key=$value"
+    done <<< "$1"
+}
+
 # Export environment variables from config
 export_env_vars() {
     local config_file="$1"
-
-    while IFS='=' read -r key value; do
-        [[ -z "$key" ]] && continue
-        # Expand any variables in value
-        value=$(echo "$value" | envsubst 2>/dev/null || echo "$value")
-        export "$key=$value"
-        log_debug "Exported env: $key=$value"
-    done < <(get_env_vars "$config_file")
+    export_env_string "$(get_env_vars "$config_file")"
 }
 
 # Run a hook from config if defined

@@ -96,12 +96,8 @@ execute_setup() {
         local step_env
         step_env=$(yq -r ".setup[$i].env // {} | to_entries | .[] | \"\(.key)=\(.value)\"" "$config_file" 2>/dev/null)
 
-        # Export step environment (use envsubst for safe variable expansion)
-        while IFS='=' read -r key value; do
-            [[ -z "$key" ]] && continue
-            value=$(echo "$value" | envsubst 2>/dev/null || echo "$value")
-            export "$key=$value"
-        done <<< "$step_env"
+        # Export step environment
+        export_env_string "$step_env"
 
         # Execute command
         local exec_dir="$worktree_path/$step_dir"
@@ -196,11 +192,7 @@ run_setup_step() {
             local step_env
             step_env=$(yq -r ".setup[$i].env // {} | to_entries | .[] | \"\(.key)=\(.value)\"" "$config_file" 2>/dev/null)
 
-            while IFS='=' read -r key value; do
-                [[ -z "$key" ]] && continue
-                value=$(echo "$value" | envsubst 2>/dev/null || echo "$value")
-                export "$key=$value"
-            done <<< "$step_env"
+            export_env_string "$step_env"
 
             (cd "$exec_dir" && eval "$step_cmd")
             return $?
