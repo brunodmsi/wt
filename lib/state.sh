@@ -67,7 +67,7 @@ _set_worktree_state_locked() {
     if [[ "$value" =~ ^[0-9]+$ ]]; then
         yq -i ".worktrees.\"$sanitized\".$field = $value" "$file"
     else
-        yq -i ".worktrees.\"$sanitized\".$field = \"$value\"" "$file"
+        VALUE="$value" yq -i ".worktrees.\"$sanitized\".$field = strenv(VALUE)" "$file"
     fi
 }
 
@@ -126,13 +126,13 @@ _create_worktree_state_locked() {
     local ts="$5"
     local file="$6"
 
-    yq -i ".worktrees.\"$sanitized\" = {
-        \"branch\": \"$branch\",
-        \"path\": \"$path\",
-        \"slot\": $slot,
-        \"created_at\": \"$ts\",
-        \"services\": {}
-    }" "$file"
+    BRANCH="$branch" PATH_VAL="$path" TS="$ts" yq -i "
+        .worktrees.\"$sanitized\".branch = strenv(BRANCH) |
+        .worktrees.\"$sanitized\".path = strenv(PATH_VAL) |
+        .worktrees.\"$sanitized\".slot = $slot |
+        .worktrees.\"$sanitized\".created_at = strenv(TS) |
+        .worktrees.\"$sanitized\".services = {}
+    " "$file"
 
     log_debug "Created state for worktree: $branch"
 }
@@ -186,7 +186,7 @@ _set_service_state_locked() {
     if [[ "$value" =~ ^[0-9]+$ ]]; then
         yq -i ".worktrees.\"$sanitized\".services.\"$service\".$field = $value" "$file"
     else
-        yq -i ".worktrees.\"$sanitized\".services.\"$service\".$field = \"$value\"" "$file"
+        VALUE="$value" yq -i ".worktrees.\"$sanitized\".services.\"$service\".$field = strenv(VALUE)" "$file"
     fi
 }
 
@@ -223,7 +223,7 @@ _update_service_status_locked() {
 
     # Build a single yq expression to batch all updates
     local base=".worktrees.\"$sanitized\".services.\"$service\""
-    local expr="${base}.status = \"$status\""
+    local expr="${base}.status = strenv(STATUS)"
 
     if [[ -n "$pid" ]]; then
         expr="$expr | ${base}.pid = $pid"
@@ -236,10 +236,10 @@ _update_service_status_locked() {
     fi
 
     if [[ "$status" == "running" ]]; then
-        expr="$expr | ${base}.started_at = \"$ts\""
+        expr="$expr | ${base}.started_at = strenv(TS)"
     fi
 
-    yq -i "$expr" "$file"
+    STATUS="$status" TS="$ts" yq -i "$expr" "$file"
 }
 
 # List all worktrees for a project
