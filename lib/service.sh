@@ -142,6 +142,13 @@ start_service() {
     local window_name
     window_name=$(get_session_name "$project" "$branch")
 
+    # Check if port is available before starting
+    if ! is_port_available "$port"; then
+        log_error "Port $port is already in use (service: $service_name)"
+        log_error "Use 'wt ports set $service_name <port>' to assign a different port"
+        return 1
+    fi
+
     log_info "Starting $service_name on port $port..."
 
     # Find pane for this service within the worktree window
