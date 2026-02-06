@@ -135,15 +135,9 @@ cmd_create() {
     trap - INT TERM
 
     # Run post_create hook if defined
-    local post_create
-    post_create=$(yaml_get "$PROJECT_CONFIG_FILE" ".hooks.post_create" "")
-    if [[ -n "$post_create" ]] && [[ "$post_create" != "null" ]]; then
-        export WORKTREE_PATH="$wt_path"
-        export BRANCH_NAME="$branch"
-        if ! eval "$post_create"; then
-            log_warn "post_create hook exited with errors"
-        fi
-    fi
+    export WORKTREE_PATH="$wt_path"
+    export BRANCH_NAME="$branch"
+    run_hook "$PROJECT_CONFIG_FILE" "post_create"
 
     echo ""
     if [[ "$setup_failed" -eq 1 ]]; then

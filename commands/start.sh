@@ -144,14 +144,8 @@ cmd_start() {
     fi
 
     # Run post_start hook if defined
-    local post_start
-    post_start=$(yaml_get "$PROJECT_CONFIG_FILE" ".hooks.post_start" "")
-    if [[ -n "$post_start" ]] && [[ "$post_start" != "null" ]]; then
-        export BRANCH_NAME="$branch"
-        if ! eval "$post_start"; then
-            log_warn "post_start hook exited with errors"
-        fi
-    fi
+    export BRANCH_NAME="$branch"
+    run_hook "$PROJECT_CONFIG_FILE" "post_start"
 
     # Optionally attach
     if [[ "$attach" -eq 1 ]]; then

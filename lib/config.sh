@@ -323,6 +323,23 @@ export_env_vars() {
     done < <(get_env_vars "$config_file")
 }
 
+# Run a hook from config if defined
+# Export environment variables before calling this function
+# Usage: run_hook <config_file> <hook_name>
+run_hook() {
+    local config_file="$1"
+    local hook_name="$2"
+
+    local hook_cmd
+    hook_cmd=$(yaml_get "$config_file" ".hooks.$hook_name" "")
+
+    if [[ -n "$hook_cmd" ]] && [[ "$hook_cmd" != "null" ]]; then
+        if ! eval "$hook_cmd"; then
+            log_warn "$hook_name hook exited with errors"
+        fi
+    fi
+}
+
 # List all configured projects
 list_projects() {
     for config_file in "$WT_PROJECTS_DIR"/*.yaml; do

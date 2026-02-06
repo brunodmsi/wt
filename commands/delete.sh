@@ -75,17 +75,11 @@ cmd_delete() {
     kill_session "$window_name" "$PROJECT_CONFIG_FILE"
 
     # Run pre_delete hook if defined
-    local pre_delete
-    pre_delete=$(yaml_get "$PROJECT_CONFIG_FILE" ".hooks.pre_delete" "")
-    if [[ -n "$pre_delete" ]] && [[ "$pre_delete" != "null" ]]; then
-        local wt_path
-        wt_path=$(worktree_path "$branch" "$repo_root")
-        export WORKTREE_PATH="$wt_path"
-        export BRANCH_NAME="$branch"
-        if ! eval "$pre_delete"; then
-            log_warn "pre_delete hook exited with errors"
-        fi
-    fi
+    local wt_path
+    wt_path=$(worktree_path "$branch" "$repo_root")
+    export WORKTREE_PATH="$wt_path"
+    export BRANCH_NAME="$branch"
+    run_hook "$PROJECT_CONFIG_FILE" "pre_delete"
 
     # Remove worktree
     if ! remove_worktree "$branch" "$force" "$keep_branch" "$repo_root"; then
