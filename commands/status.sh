@@ -93,26 +93,31 @@ cmd_status() {
     print_kv "Slot" "$slot"
     print_kv "Created" "$created_at"
 
-    # Git info
+    # Git info (single git call for commit, dirty state, tracking, ahead/behind)
     if [[ -d "$wt_path" ]]; then
+        local git_status
+        git_status=$(git -C "$wt_path" status -b --porcelain=v2 2>/dev/null)
+
         local commit
-        commit=$(git -C "$wt_path" rev-parse --short HEAD 2>/dev/null)
-        print_kv "Commit" "$commit"
+        commit=$(echo "$git_status" | grep '^# branch.oid' | cut -d' ' -f3)
+        print_kv "Commit" "${commit:0:7}"
 
         local dirty="clean"
-        if [[ -n $(git -C "$wt_path" status --porcelain 2>/dev/null) ]]; then
+        if echo "$git_status" | grep -q '^[12?!]'; then
             dirty="${YELLOW}uncommitted changes${NC}"
         fi
         echo -e "$(printf '%-20s' "Status:")$dirty"
 
         # Ahead/behind info
         local tracking
-        tracking=$(git -C "$wt_path" rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null)
+        tracking=$(echo "$git_status" | grep '^# branch.upstream' | cut -d' ' -f3)
         if [[ -n "$tracking" ]]; then
+            local ab_line
+            ab_line=$(echo "$git_status" | grep '^# branch.ab')
             local ahead behind
-            ahead=$(git -C "$wt_path" rev-list --count @{u}..HEAD 2>/dev/null || echo 0)
-            behind=$(git -C "$wt_path" rev-list --count HEAD..@{u} 2>/dev/null || echo 0)
-            print_kv "Tracking" "$tracking (+$ahead/-$behind)"
+            ahead=$(echo "$ab_line" | awk '{print $3}' | tr -d '+')
+            behind=$(echo "$ab_line" | awk '{print $4}' | tr -d '-')
+            print_kv "Tracking" "$tracking (+${ahead:-0}/-${behind:-0})"
         fi
     fi
 
