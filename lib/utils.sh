@@ -155,6 +155,21 @@ expand_path() {
     echo "${path/#\~/$HOME}"
 }
 
+# Execute a command while holding an exclusive file lock
+# Usage: with_file_lock "/path/to/file" command args...
+with_file_lock() {
+    local lock_file="$1.lock"
+    shift
+
+    local fd
+    exec {fd}>"$lock_file"
+    flock -x "$fd"
+    "$@"
+    local rc=$?
+    exec {fd}>&-
+    return $rc
+}
+
 # Check if port is in use
 port_in_use() {
     local port="$1"

@@ -160,7 +160,7 @@ get_slot_for_worktree() {
     yaml_get "$file" ".slots.\"$project\".\"$sanitized\"" ""
 }
 
-# Claim a slot for a worktree
+# Claim a slot for a worktree (with file locking)
 # Returns the slot number or fails
 claim_slot() {
     local project="$1"
@@ -171,12 +171,21 @@ claim_slot() {
     local file
     file=$(slots_file)
 
+    with_file_lock "$file" _claim_slot_locked "$project" "$branch" "$max_slots" "$file"
+}
+
+_claim_slot_locked() {
+    local project="$1"
+    local branch="$2"
+    local max_slots="$3"
+    local file="$4"
+
     local sanitized
     sanitized=$(sanitize_branch_name "$branch")
 
     # Check if already has a slot
     local existing_slot
-    existing_slot=$(get_slot_for_worktree "$project" "$branch")
+    existing_slot=$(yq -r ".slots.\"$project\".\"$sanitized\" // \"\"" "$file" 2>/dev/null)
 
     if [[ -n "$existing_slot" ]]; then
         echo "$existing_slot"
@@ -195,7 +204,9 @@ claim_slot() {
 
     while read -r slot; do
         [[ -z "$slot" ]] && continue
-        used_slots[$slot]=1
+        if [[ "$slot" =~ ^[0-9]+$ ]] && (( slot < max_slots )); then
+            used_slots[$slot]=1
+        fi
     done <<< "$assignments"
 
     # Find first available
@@ -212,7 +223,7 @@ claim_slot() {
     return 1
 }
 
-# Release a slot
+# Release a slot (with file locking)
 release_slot() {
     local project="$1"
     local branch="$2"
@@ -223,6 +234,14 @@ release_slot() {
     if [[ ! -f "$file" ]]; then
         return
     fi
+
+    with_file_lock "$file" _release_slot_locked "$project" "$branch" "$file"
+}
+
+_release_slot_locked() {
+    local project="$1"
+    local branch="$2"
+    local file="$3"
 
     local sanitized
     sanitized=$(sanitize_branch_name "$branch")
