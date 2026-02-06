@@ -85,8 +85,8 @@ require_command() {
 # Sanitize branch name for filesystem/tmux use
 sanitize_branch_name() {
     local branch="$1"
-    # Replace / with - and remove other problematic chars
-    echo "$branch" | sed 's|/|-|g' | sed 's|[^a-zA-Z0-9_-]||g'
+    # Replace / with - and remove other problematic chars (single sed call)
+    echo "$branch" | sed 's|/|-|g; s|[^a-zA-Z0-9_-]||g'
 }
 
 # Check if we're in a git repository
