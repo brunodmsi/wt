@@ -87,26 +87,24 @@ list_worktrees_pretty() {
         printf "%s\n" "$(printf '%.0s-' {1..80})"
     fi
 
-    # List worktrees from state
-    while read -r sanitized_branch; do
+    # Batch: read all worktree data in one yq call (branch, path, slot per entry)
+    local state_file
+    state_file=$(state_file "$project")
+
+    local all_worktrees
+    all_worktrees=$(yq -r '.worktrees | to_entries[] | [.key, .value.branch // .key, .value.path // "", .value.slot // ""] | @tsv' "$state_file" 2>/dev/null)
+
+    while IFS=$'\t' read -r sanitized_branch branch path slot; do
         [[ -z "$sanitized_branch" ]] && continue
 
-        local branch
-        branch=$(get_worktree_state "$project" "$sanitized_branch" "branch")
-        branch="${branch:-$sanitized_branch}"
-
-        local path
-        path=$(get_worktree_state "$project" "$sanitized_branch" "path")
-
-        local slot
-        slot=$(get_worktree_state "$project" "$sanitized_branch" "slot")
-
         local session
-        session=$(get_session_name "$project" "$branch")
+        session=$(sanitize_branch_name "$branch")
 
         if [[ "$show_status" -eq 1 ]]; then
             local session_status="inactive"
-            if session_exists "$session"; then
+            local tmux_session
+            tmux_session=$(get_tmux_session_name "$PROJECT_CONFIG_FILE")
+            if window_exists "$tmux_session" "$session" 2>/dev/null; then
                 session_status="${GREEN}active${NC}"
             fi
 
@@ -130,7 +128,7 @@ list_worktrees_pretty() {
         fi
 
         ((count++))
-    done < <(list_worktree_states "$project")
+    done <<< "$all_worktrees"
 
     echo ""
     echo -e "Total: ${BOLD}$count${NC} worktree(s), ${BOLD}$used_slots${NC}/${BOLD}$total_slots${NC} slots in use"
@@ -140,30 +138,29 @@ list_worktrees_json() {
     local project="$1"
     local repo_root="$2"
 
+    local state_file
+    state_file=$(state_file "$project")
+
+    # Read all worktree data in one yq call, output as JSON directly
+    local tmux_session
+    tmux_session=$(get_tmux_session_name "$PROJECT_CONFIG_FILE")
+
     local worktrees="[]"
 
-    while read -r sanitized_branch; do
+    # Batch read all fields per worktree
+    local all_data
+    all_data=$(yq -r '.worktrees | to_entries[] | [.key, .value.branch // .key, .value.path // "", .value.slot // "", .value.created_at // ""] | @tsv' "$state_file" 2>/dev/null)
+
+    while IFS=$'\t' read -r sanitized_branch branch path slot created_at; do
         [[ -z "$sanitized_branch" ]] && continue
 
-        local branch
-        branch=$(get_worktree_state "$project" "$sanitized_branch" "branch")
-
-        local path
-        path=$(get_worktree_state "$project" "$sanitized_branch" "path")
-
-        local slot
-        slot=$(get_worktree_state "$project" "$sanitized_branch" "slot")
-
         local session
-        session=$(get_session_name "$project" "$branch")
+        session=$(sanitize_branch_name "$branch")
 
         local session_active="false"
-        if session_exists "$session"; then
+        if window_exists "$tmux_session" "$session" 2>/dev/null; then
             session_active="true"
         fi
-
-        local created_at
-        created_at=$(get_worktree_state "$project" "$sanitized_branch" "created_at")
 
         worktrees=$(echo "$worktrees" | jq --arg branch "$branch" \
             --arg path "$path" \
@@ -179,7 +176,7 @@ list_worktrees_json() {
                 session_active: ($active == "true"),
                 created_at: $created
             }]')
-    done < <(list_worktree_states "$project")
+    done <<< "$all_data"
 
     echo "$worktrees" | jq '.'
 }
