@@ -51,6 +51,17 @@ cmd_init() {
         project_name=$(basename "$repo_root")
     fi
 
+    # Sanitize project name: replace unsafe chars with hyphens, strip leading/trailing hyphens
+    project_name=$(echo "$project_name" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/^-*//;s/-*$//')
+
+    if [[ -z "$project_name" ]]; then
+        die "Could not derive a valid project name. Use --name to specify one."
+    fi
+
+    if ! [[ "$project_name" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
+        die "Invalid project name: '$project_name'. Must start with alphanumeric and contain only [a-zA-Z0-9._-]"
+    fi
+
     local config_file
     config_file=$(project_config_path "$project_name")
 
