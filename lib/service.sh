@@ -12,25 +12,21 @@ find_service_pane_index() {
     local config_file="$1"
     local service_name="$2"
 
-    local pane_count
-    pane_count=$(yaml_array_length "$config_file" ".tmux.windows[0].panes")
+    # Read all pane services in one yq call
+    local pane_services
+    pane_services=$(yq -r '.tmux.windows[0].panes[]?.service // ""' "$config_file" 2>/dev/null)
 
-    log_debug "find_service_pane_index: service=$service_name pane_count=$pane_count"
+    log_debug "find_service_pane_index: service=$service_name"
 
-    # Pane mapping: config_index -> tmux_pane (sequential due to visual renumbering)
-    local -a pane_map=(0 1 2 3 4)
-
-    for ((p = 0; p < pane_count; p++)); do
-        local pane_service
-        pane_service=$(yq -r ".tmux.windows[0].panes[$p].service // \"\"" "$config_file" 2>/dev/null)
-
-        if [[ "$pane_service" == "$service_name" ]]; then
-            local tmux_pane="${pane_map[$p]}"
-            log_debug "find_service_pane_index: found $service_name at config $p -> tmux pane $tmux_pane"
-            echo "$tmux_pane"
+    local p=0
+    while IFS= read -r svc; do
+        if [[ "$svc" == "$service_name" ]]; then
+            log_debug "find_service_pane_index: found $service_name at config $p -> tmux pane $p"
+            echo "$p"
             return 0
         fi
-    done
+        ((p++))
+    done <<< "$pane_services"
 
     echo ""
     return 1
@@ -51,15 +47,12 @@ start_service() {
         return 1
     fi
 
-    # Get service configuration
-    local svc_dir
-    svc_dir=$(get_service_config "$config_file" "$service_name" "working_dir")
+    # Get service configuration (single yq call for all fields)
+    local svc_config
+    svc_config=$(yq -r ".services[] | select(.name == \"$service_name\") | [.working_dir // \".\", .command // \"\", .port_key // \"\"] | @tsv" "$config_file" 2>/dev/null)
 
-    local svc_cmd
-    svc_cmd=$(get_service_config "$config_file" "$service_name" "command")
-
-    local port_key
-    port_key=$(get_service_config "$config_file" "$service_name" "port_key")
+    local svc_dir svc_cmd port_key
+    IFS=$'\t' read -r svc_dir svc_cmd port_key <<< "$svc_config"
 
     if [[ -z "$svc_cmd" ]] || [[ "$svc_cmd" == "null" ]]; then
         log_error "Service not found or has no command: $service_name"
@@ -221,21 +214,24 @@ start_all_services() {
     local branch="$2"
     local config_file="$3"
 
-    local service_count
-    service_count=$(get_services "$config_file")
+    # Pre-fetch all service names in one yq call
+    local service_names
+    service_names=$(yq -r '.services[].name // empty' "$config_file" 2>/dev/null)
 
-    if [[ "$service_count" -eq 0 ]]; then
+    if [[ -z "$service_names" ]]; then
         log_info "No services configured"
         return 0
     fi
+
+    local service_count
+    service_count=$(echo "$service_names" | wc -l | tr -d ' ')
 
     log_info "Starting $service_count services..."
 
     local failed=0
 
-    for ((i = 0; i < service_count; i++)); do
-        local name
-        name=$(get_service_by_index "$config_file" "$i" "name")
+    while read -r name; do
+        [[ -z "$name" ]] && continue
 
         if ! start_service "$project" "$branch" "$name" "$config_file"; then
             ((failed++))
@@ -243,7 +239,7 @@ start_all_services() {
 
         # Small delay between service starts
         sleep 1
-    done
+    done <<< "$service_names"
 
     if [[ "$failed" -gt 0 ]]; then
         log_warn "$failed service(s) failed to start"
@@ -260,20 +256,23 @@ stop_all_services() {
     local branch="$2"
     local config_file="$3"
 
-    local service_count
-    service_count=$(get_services "$config_file")
+    # Pre-fetch all service names in one yq call
+    local service_names
+    service_names=$(yq -r '.services[].name // empty' "$config_file" 2>/dev/null)
 
-    if [[ "$service_count" -eq 0 ]]; then
+    if [[ -z "$service_names" ]]; then
         return 0
     fi
 
+    local service_count
+    service_count=$(echo "$service_names" | wc -l | tr -d ' ')
+
     log_info "Stopping $service_count services..."
 
-    for ((i = 0; i < service_count; i++)); do
-        local name
-        name=$(get_service_by_index "$config_file" "$i" "name")
+    while read -r name; do
+        [[ -z "$name" ]] && continue
         stop_service "$project" "$branch" "$name" "$config_file"
-    done
+    done <<< "$service_names"
 
     log_success "All services stopped"
 }
@@ -284,14 +283,12 @@ run_health_check() {
     local port="$2"
     local config_file="$3"
 
-    local health_type
-    health_type=$(yq -r ".services[] | select(.name == \"$service_name\") | .health_check.type" "$config_file" 2>/dev/null)
+    # Batch health check config (single yq call for all fields)
+    local health_config
+    health_config=$(yq -r ".services[] | select(.name == \"$service_name\") | .health_check | [.type // \"\", .timeout // 30, .interval // 2, .url // \"\"] | @tsv" "$config_file" 2>/dev/null)
 
-    local timeout
-    timeout=$(yq -r ".services[] | select(.name == \"$service_name\") | .health_check.timeout // 30" "$config_file" 2>/dev/null)
-
-    local interval
-    interval=$(yq -r ".services[] | select(.name == \"$service_name\") | .health_check.interval // 2" "$config_file" 2>/dev/null)
+    local health_type timeout interval health_url
+    IFS=$'\t' read -r health_type timeout interval health_url <<< "$health_config"
 
     log_info "Running health check for $service_name (${health_type}, timeout: ${timeout}s)..."
 
@@ -309,8 +306,7 @@ run_health_check() {
             done
             ;;
         http)
-            local url
-            url=$(yq -r ".services[] | select(.name == \"$service_name\") | .health_check.url" "$config_file" 2>/dev/null)
+            local url="$health_url"
             url=$(echo "$url" | envsubst 2>/dev/null || echo "$url")
 
             while ! curl -sf "$url" &>/dev/null; do
