@@ -312,15 +312,20 @@ setup_services_top_layout() {
     local win_idx="$5"
     local pane_count="$6"
 
-    # Count how many service panes
+    # Pre-fetch all pane configs and service working dirs in 2 yq calls (replaces ~5N calls)
+    local all_pane_data
+    all_pane_data=$(yq -r ".tmux.windows[$win_idx].panes[] | [.service // \"\", .command // \"\"] | @tsv" "$config_file" 2>/dev/null)
+
+    local all_svc_dirs
+    all_svc_dirs=$(yq -r '.services[] | [.name, .working_dir // ""] | @tsv' "$config_file" 2>/dev/null)
+
+    # Count service panes from pre-fetched data
     local service_count=0
-    for ((i = 0; i < pane_count; i++)); do
-        local svc
-        svc=$(yq -r ".tmux.windows[$win_idx].panes[$i].service // \"\"" "$config_file" 2>/dev/null)
-        if [[ -n "$svc" ]] && [[ "$svc" != "null" ]]; then
+    while IFS=$'\t' read -r _svc _cmd; do
+        if [[ -n "$_svc" ]] && [[ "$_svc" != "null" ]]; then
             ((service_count++))
         fi
-    done
+    done <<< "$all_pane_data"
 
     # Split sequence - tmux renumbers panes visually after each split!
     # We must account for this when targeting panes.
@@ -357,21 +362,21 @@ setup_services_top_layout() {
     # Build mapping array: config_index -> tmux_pane (sequential due to visual renumbering)
     local -a pane_map=(0 1 2 3 4)
 
-    # Configure each pane
-    for ((p = 0; p < pane_count; p++)); do
+    # Configure each pane using pre-fetched data (no per-pane yq calls)
+    local p=0
+    while IFS=$'\t' read -r pane_service pane_cmd; do
+        [[ $p -ge $pane_count ]] && break
         local tmux_pane="${pane_map[$p]}"
 
-        local pane_config
-        pane_config=$(yq ".tmux.windows[$win_idx].panes[$p]" "$config_file" 2>/dev/null)
-
-        local pane_service=""
-        local pane_cmd=""
-        pane_service=$(echo "$pane_config" | yq -r '.service // ""' 2>/dev/null)
-        pane_cmd=$(echo "$pane_config" | yq -r '.command // ""' 2>/dev/null)
-
         if [[ -n "$pane_service" ]] && [[ "$pane_service" != "null" ]]; then
-            local svc_working_dir
-            svc_working_dir=$(yq -r ".services[] | select(.name == \"$pane_service\") | .working_dir // \"\"" "$config_file" 2>/dev/null)
+            # Look up working_dir from pre-fetched service dirs
+            local svc_working_dir=""
+            while IFS=$'\t' read -r svc_name svc_dir; do
+                if [[ "$svc_name" == "$pane_service" ]]; then
+                    svc_working_dir="$svc_dir"
+                    break
+                fi
+            done <<< "$all_svc_dirs"
 
             if [[ -n "$svc_working_dir" ]] && [[ "$svc_working_dir" != "null" ]] && [[ -n "$root_dir" ]]; then
                 tmux send-keys -t "${session}:${window}.${tmux_pane}" "cd '$root_dir/$svc_working_dir'" Enter
@@ -388,7 +393,8 @@ setup_services_top_layout() {
                 tmux send-keys -t "${session}:${window}.${tmux_pane}" "cd '$root_dir'" Enter
             fi
         fi
-    done
+        ((p++))
+    done <<< "$all_pane_data"
 
     # Select claude pane (pane 3 = bottom-left) as active
     tmux select-pane -t "${session}:${window}.3"
@@ -403,39 +409,41 @@ configure_panes() {
     local pane_count="$5"
     local root_dir="${6:-}"
 
-    for ((p = 0; p < pane_count; p++)); do
-        local pane_config
-        pane_config=$(yq ".tmux.windows[$win_idx].panes[$p]" "$config_file" 2>/dev/null)
+    # Pre-fetch all pane configs in a single yq call (handles both string and object panes)
+    local all_pane_data
+    all_pane_data=$(yq -r ".tmux.windows[$win_idx].panes[] | if type == \"!!str\" then [\"string\", \"\", ., \"\"] else [\"object\", .service // \"\", .command // \"\", .working_dir // \"\"] end | @tsv" "$config_file" 2>/dev/null)
 
-        local pane_type
-        pane_type=$(echo "$pane_config" | yq 'type' 2>/dev/null)
+    # Pre-fetch service working dirs for cross-reference
+    local all_svc_dirs
+    all_svc_dirs=$(yq -r '.services[] | [.name, .working_dir // ""] | @tsv' "$config_file" 2>/dev/null)
 
-        local pane_service=""
-        local pane_cmd=""
+    local p=0
+    while IFS=$'\t' read -r pane_type pane_service pane_cmd pane_working_dir; do
+        [[ $p -ge $pane_count ]] && break
 
-        if [[ "$pane_type" == "\"string\"" ]]; then
-            pane_cmd=$(echo "$pane_config" | yq -r '.' 2>/dev/null)
-        else
-            pane_service=$(echo "$pane_config" | yq -r '.service // ""' 2>/dev/null)
-            pane_cmd=$(echo "$pane_config" | yq -r '.command // ""' 2>/dev/null)
+        if [[ "$pane_type" == "string" ]]; then
+            # String pane: pane_cmd is in pane_service field (from yq output), swap it
+            pane_cmd="$pane_service"
+            pane_service=""
         fi
 
         if [[ -n "$pane_service" ]] && [[ "$pane_service" != "null" ]]; then
-            # Get service working directory
-            local svc_working_dir
-            svc_working_dir=$(yq -r ".services[] | select(.name == \"$pane_service\") | .working_dir // \"\"" "$config_file" 2>/dev/null)
+            # Look up service working_dir from pre-fetched data
+            local svc_working_dir=""
+            while IFS=$'\t' read -r svc_name svc_dir; do
+                if [[ "$svc_name" == "$pane_service" ]]; then
+                    svc_working_dir="$svc_dir"
+                    break
+                fi
+            done <<< "$all_svc_dirs"
 
-            # CD to service directory if configured
             if [[ -n "$svc_working_dir" ]] && [[ "$svc_working_dir" != "null" ]] && [[ -n "$root_dir" ]]; then
                 tmux send-keys -t "${session}:${window}.${p}" "cd '$root_dir/$svc_working_dir'" Enter
             fi
             tmux send-keys -t "${session}:${window}.${p}" "# Service: $pane_service (use 'wt start' to run)" Enter
         elif [[ -n "$pane_cmd" ]] && [[ "$pane_cmd" != "null" ]] && [[ "$pane_cmd" != "" ]]; then
-            # Get optional working_dir for command pane, default to worktree root
-            local cmd_working_dir
-            cmd_working_dir=$(echo "$pane_config" | yq -r '.working_dir // ""' 2>/dev/null)
+            local cmd_working_dir="$pane_working_dir"
 
-            # CD to working directory (or root if not specified)
             if [[ -n "$root_dir" ]]; then
                 if [[ -n "$cmd_working_dir" ]] && [[ "$cmd_working_dir" != "null" ]] && [[ "$cmd_working_dir" != "." ]]; then
                     tmux send-keys -t "${session}:${window}.${p}" "cd '$root_dir/$cmd_working_dir'" Enter
@@ -445,7 +453,8 @@ configure_panes() {
             fi
             tmux send-keys -t "${session}:${window}.${p}" "$pane_cmd" Enter
         fi
-    done
+        ((p++))
+    done <<< "$all_pane_data"
 }
 
 # Kill a tmux window (not the whole session)
