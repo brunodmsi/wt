@@ -146,7 +146,9 @@ cmd_create() {
     if [[ -n "$post_create" ]] && [[ "$post_create" != "null" ]]; then
         export WORKTREE_PATH="$wt_path"
         export BRANCH_NAME="$branch"
-        eval "$post_create"
+        if ! eval "$post_create"; then
+            log_warn "post_create hook exited with errors"
+        fi
     fi
 
     echo ""

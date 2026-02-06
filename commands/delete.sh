@@ -90,7 +90,9 @@ cmd_delete() {
         wt_path=$(worktree_path "$branch" "$repo_root")
         export WORKTREE_PATH="$wt_path"
         export BRANCH_NAME="$branch"
-        eval "$pre_delete"
+        if ! eval "$pre_delete"; then
+            log_warn "pre_delete hook exited with errors"
+        fi
     fi
 
     # Remove worktree

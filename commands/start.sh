@@ -156,7 +156,9 @@ cmd_start() {
     post_start=$(yaml_get "$PROJECT_CONFIG_FILE" ".hooks.post_start" "")
     if [[ -n "$post_start" ]] && [[ "$post_start" != "null" ]]; then
         export BRANCH_NAME="$branch"
-        eval "$post_start"
+        if ! eval "$post_start"; then
+            log_warn "post_start hook exited with errors"
+        fi
     fi
 
     # Optionally attach
