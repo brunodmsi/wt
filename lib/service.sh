@@ -124,6 +124,12 @@ start_service() {
     # Build exec_dir early so pre_start can use it
     local exec_dir="$worktree_path/$svc_dir"
 
+    if [[ ! -d "$exec_dir" ]]; then
+        log_error "Service working directory does not exist: $exec_dir"
+        log_error "  Check 'working_dir' for service '$service_name' in config"
+        return 1
+    fi
+
     # Run pre_start commands in the service's working directory
     local pre_start
     pre_start=$(yq -r ".services[] | select(.name == \"$service_name\") | .pre_start // [] | .[]" "$config_file" 2>/dev/null)
