@@ -70,11 +70,33 @@ cmd_create() {
         die "Worktree already exists for branch: $branch"
     fi
 
+    # Track state for cleanup on interrupt
+    local _create_cleanup_project=""
+    local _create_cleanup_branch=""
+    local _create_cleanup_slot=""
+    local _create_cleanup_wt_path=""
+
+    _create_cleanup() {
+        if [[ -n "$_create_cleanup_slot" ]]; then
+            log_warn "Interrupted — cleaning up partial state..."
+            release_slot "$_create_cleanup_project" "$_create_cleanup_branch" 2>/dev/null || true
+            delete_worktree_state "$_create_cleanup_project" "$_create_cleanup_branch" 2>/dev/null || true
+            if [[ -n "$_create_cleanup_wt_path" ]] && [[ -d "$_create_cleanup_wt_path" ]]; then
+                git -C "$repo_root" worktree remove --force "$_create_cleanup_wt_path" 2>/dev/null || true
+                git -C "$repo_root" worktree prune 2>/dev/null || true
+            fi
+        fi
+    }
+    trap _create_cleanup INT TERM
+
     # Claim a slot for reserved ports
     local slot
     if ! slot=$(claim_slot "$project" "$branch" "$PROJECT_RESERVED_SLOTS"); then
         die "No available slots. Maximum $PROJECT_RESERVED_SLOTS concurrent worktrees with reserved ports. Stop or delete an existing worktree first."
     fi
+    _create_cleanup_project="$project"
+    _create_cleanup_branch="$branch"
+    _create_cleanup_slot="$slot"
 
     log_info "Claimed slot $slot for worktree"
 
@@ -82,8 +104,10 @@ cmd_create() {
     local wt_path
     if ! wt_path=$(create_worktree "$branch" "$base_branch" "$repo_root"); then
         release_slot "$project" "$branch"
+        _create_cleanup_slot=""  # Prevent double cleanup
         die "Failed to create worktree"
     fi
+    _create_cleanup_wt_path="$wt_path"
 
     # Store state
     create_worktree_state "$project" "$branch" "$wt_path" "$slot"
@@ -111,6 +135,10 @@ cmd_create() {
 
     create_session "$window_name" "$wt_path" "$PROJECT_CONFIG_FILE"
     set_session_state "$project" "$branch" "$window_name"
+
+    # Creation complete, disable cleanup trap
+    _create_cleanup_slot=""
+    trap - INT TERM
 
     # Run post_create hook if defined
     local post_create
