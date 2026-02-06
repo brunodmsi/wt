@@ -48,15 +48,7 @@ cmd_create() {
         return 1
     fi
 
-    # Detect or validate project
-    if [[ -z "$project" ]]; then
-        project=$(detect_project)
-        if [[ -z "$project" ]]; then
-            die "Could not detect project. Use --project or run 'wt init' first."
-        fi
-    fi
-
-    # Load project configuration
+    project=$(require_project "$project" "Could not detect project. Use --project or run 'wt init' first.")
     load_project_config "$project"
 
     # Verify we're in or at the repo

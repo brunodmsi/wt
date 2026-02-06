@@ -75,15 +75,7 @@ cmd_stop() {
         fi
     fi
 
-    # Detect or validate project
-    if [[ -z "$project" ]]; then
-        project=$(detect_project)
-        if [[ -z "$project" ]]; then
-            die "Could not detect project. Use --project option."
-        fi
-    fi
-
-    # Load project configuration
+    project=$(require_project "$project")
     load_project_config "$project"
 
     # Stop services

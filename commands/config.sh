@@ -83,12 +83,7 @@ EOF
         fi
     else
         # Project config
-        if [[ -z "$project" ]]; then
-            project=$(detect_project)
-            if [[ -z "$project" ]]; then
-                die "Could not detect project. Specify a project name or use --global."
-            fi
-        fi
+        project=$(require_project "$project" "Could not detect project. Specify a project name or use --global.")
 
         config_file=$(project_config_path "$project")
 

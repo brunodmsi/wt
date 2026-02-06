@@ -65,15 +65,7 @@ cmd_ports() {
         return 1
     fi
 
-    # Detect or validate project
-    if [[ -z "$project" ]]; then
-        project=$(detect_project)
-        if [[ -z "$project" ]]; then
-            die "Could not detect project. Use --project option."
-        fi
-    fi
-
-    # Load project configuration
+    project=$(require_project "$project")
     load_project_config "$project"
 
     # Get slot
@@ -289,13 +281,7 @@ cmd_ports_set() {
         return 1
     fi
 
-    # Detect or validate project
-    if [[ -z "$project" ]]; then
-        project=$(detect_project)
-        if [[ -z "$project" ]]; then
-            die "Could not detect project. Use --project option."
-        fi
-    fi
+    project=$(require_project "$project")
 
     # Auto-detect branch from current git branch if not specified
     if [[ -z "$branch" ]]; then
@@ -392,13 +378,7 @@ cmd_ports_clear() {
         return 1
     fi
 
-    # Detect or validate project
-    if [[ -z "$project" ]]; then
-        project=$(detect_project)
-        if [[ -z "$project" ]]; then
-            die "Could not detect project. Use --project option."
-        fi
-    fi
+    project=$(require_project "$project")
 
     # Auto-detect branch from current git branch if not specified
     if [[ -z "$branch" ]]; then

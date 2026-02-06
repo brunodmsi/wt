@@ -132,6 +132,23 @@ yaml_delete() {
     fi
 }
 
+# Resolve project: use provided value or auto-detect
+# Dies with error if project cannot be determined
+# Usage: project=$(require_project "$project" ["custom error message"])
+require_project() {
+    local project="$1"
+    local error_msg="${2:-Could not detect project. Use --project option.}"
+
+    if [[ -z "$project" ]]; then
+        project=$(detect_project)
+        if [[ -z "$project" ]]; then
+            die "$error_msg"
+        fi
+    fi
+
+    echo "$project"
+}
+
 # Detect project from current directory
 # Returns empty string if not in a project (does not return error code to avoid set -e issues)
 detect_project() {
