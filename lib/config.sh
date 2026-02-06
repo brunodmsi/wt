@@ -199,6 +199,26 @@ load_project_config() {
     PROJECT_DYNAMIC_PORT_MIN=$(yaml_get "$config_file" ".ports.dynamic.range.min" "4000")
     PROJECT_DYNAMIC_PORT_MAX=$(yaml_get "$config_file" ".ports.dynamic.range.max" "5000")
 
+    # Validate port ranges
+    if ! [[ "$PROJECT_RESERVED_PORT_MIN" =~ ^[0-9]+$ ]] || ! [[ "$PROJECT_RESERVED_PORT_MAX" =~ ^[0-9]+$ ]]; then
+        die "Invalid reserved port range: values must be numbers"
+    fi
+    if ! [[ "$PROJECT_DYNAMIC_PORT_MIN" =~ ^[0-9]+$ ]] || ! [[ "$PROJECT_DYNAMIC_PORT_MAX" =~ ^[0-9]+$ ]]; then
+        die "Invalid dynamic port range: values must be numbers"
+    fi
+    if (( PROJECT_RESERVED_PORT_MIN >= PROJECT_RESERVED_PORT_MAX )); then
+        die "Invalid reserved port range: min ($PROJECT_RESERVED_PORT_MIN) must be less than max ($PROJECT_RESERVED_PORT_MAX)"
+    fi
+    if (( PROJECT_DYNAMIC_PORT_MIN >= PROJECT_DYNAMIC_PORT_MAX )); then
+        die "Invalid dynamic port range: min ($PROJECT_DYNAMIC_PORT_MIN) must be less than max ($PROJECT_DYNAMIC_PORT_MAX)"
+    fi
+    if (( PROJECT_RESERVED_PORT_MIN < 1 || PROJECT_RESERVED_PORT_MAX > 65535 )); then
+        die "Reserved port range out of bounds (must be 1-65535)"
+    fi
+    if (( PROJECT_DYNAMIC_PORT_MIN < 1 || PROJECT_DYNAMIC_PORT_MAX > 65535 )); then
+        die "Dynamic port range out of bounds (must be 1-65535)"
+    fi
+
     log_debug "Loaded config for project: $PROJECT_NAME"
     log_debug "  Repo path: $PROJECT_REPO_PATH"
     log_debug "  Reserved ports: $PROJECT_RESERVED_PORT_MIN-$PROJECT_RESERVED_PORT_MAX"
