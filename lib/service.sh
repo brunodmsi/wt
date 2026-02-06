@@ -71,16 +71,25 @@ start_service() {
 
     log_debug "Getting port for service=$service_name port_key=$port_key branch=$branch slot=$slot"
 
-    local port
-    port=$(get_service_port "$port_key" "$branch" "$config_file" "$slot" "$project")
+    # Calculate all worktree ports once and reuse for both port lookup and export
+    local all_ports
+    all_ports=$(calculate_worktree_ports "$branch" "$config_file" "$slot")
+
+    # Check for port override first, then fall back to calculated port
+    local port=""
+    if [[ -n "$project" ]]; then
+        port=$(get_port_override "$project" "$branch" "$port_key")
+    fi
+    if [[ -z "$port" ]]; then
+        port=$(echo "$all_ports" | grep "^$port_key:" | cut -d: -f2)
+    fi
 
     log_debug "Got port=$port for $service_name"
 
     if [[ -z "$port" ]]; then
         log_error "Could not determine port for service: $service_name"
         log_error "  port_key=$port_key, slot=$slot, config=$config_file"
-        # Debug: show what calculate_worktree_ports returns
-        log_error "  Available ports: $(calculate_worktree_ports "$branch" "$config_file" "$slot" | tr '\n' ' ')"
+        log_error "  Available ports: $(echo "$all_ports" | tr '\n' ' ')"
         return 1
     fi
 
@@ -90,9 +99,9 @@ start_service() {
         return 0
     fi
 
-    # Export port variables (for local use and variable expansion)
+    # Export port variables using cached port data (avoids recalculating)
     export PORT="$port"
-    export_port_vars "$branch" "$config_file" "$slot" "$project"
+    export_port_vars "$branch" "$config_file" "$slot" "$project" "$all_ports"
 
     # Build environment string for tmux command
     # Start with PORT
@@ -352,6 +361,10 @@ list_services_status() {
     local slot
     slot=$(get_worktree_slot "$project" "$branch")
 
+    # Calculate all ports once for the entire listing
+    local all_ports
+    all_ports=$(calculate_worktree_ports "$branch" "$config_file" "$slot")
+
     printf "\n${BOLD}%-25s %-10s %-8s${NC}\n" "SERVICE" "STATUS" "PORT"
     printf "%s\n" "$(printf '%.0s-' {1..45})"
 
@@ -362,8 +375,14 @@ list_services_status() {
         local port_key
         port_key=$(get_service_by_index "$config_file" "$i" "port_key")
 
-        local port
-        port=$(get_service_port "$port_key" "$branch" "$config_file" "$slot" "$project")
+        # Look up port from cached calculation, with override check
+        local port=""
+        if [[ -n "$project" ]]; then
+            port=$(get_port_override "$project" "$branch" "$port_key")
+        fi
+        if [[ -z "$port" ]]; then
+            port=$(echo "$all_ports" | grep "^$port_key:" | cut -d: -f2)
+        fi
 
         local status
         status=$(get_service_status "$project" "$branch" "$name")

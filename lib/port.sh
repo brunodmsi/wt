@@ -87,12 +87,22 @@ calculate_worktree_ports() {
 
 # Export port environment variables for all services
 # If project is provided, port overrides are applied
+# Optional 5th param: pre-computed port map (SERVICE:PORT lines) to avoid recalculation
 export_port_vars() {
     local branch="$1"
     local config_file="$2"
     local slot="$3"
     local project="${4:-}"
+    local cached_ports="${5:-}"
     local svc_name svc_port  # Declare loop vars local to avoid clobbering caller's vars
+
+    # Use cached ports if provided, otherwise calculate
+    local port_data
+    if [[ -n "$cached_ports" ]]; then
+        port_data="$cached_ports"
+    else
+        port_data=$(calculate_worktree_ports "$branch" "$config_file" "$slot")
+    fi
 
     while IFS=: read -r svc_name svc_port; do
         [[ -z "$svc_name" ]] && continue
@@ -113,7 +123,7 @@ export_port_vars() {
         var_name="PORT_$(echo "$svc_name" | tr '[:lower:]-' '[:upper:]_')"
         export "$var_name=$effective_port"
         log_debug "Exported port: $var_name=$effective_port"
-    done < <(calculate_worktree_ports "$branch" "$config_file" "$slot")
+    done <<< "$port_data"
 }
 
 # Get port for a specific service
