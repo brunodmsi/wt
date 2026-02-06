@@ -119,10 +119,12 @@ cmd_create() {
     export_env_vars "$PROJECT_CONFIG_FILE"
 
     # Run setup steps
+    local setup_failed=0
     if [[ "$no_setup" -eq 0 ]]; then
         echo ""
         if ! execute_setup "$wt_path" "$PROJECT_CONFIG_FILE"; then
             log_warn "Setup completed with errors"
+            setup_failed=1
         fi
     else
         log_info "Skipping setup (--no-setup)"
@@ -152,7 +154,11 @@ cmd_create() {
     fi
 
     echo ""
-    log_success "Worktree ready!"
+    if [[ "$setup_failed" -eq 1 ]]; then
+        log_warn "Worktree created but setup had errors. You may need to run setup manually."
+    else
+        log_success "Worktree ready!"
+    fi
     echo ""
     local tmux_session
     tmux_session=$(get_tmux_session_name "$PROJECT_CONFIG_FILE")
