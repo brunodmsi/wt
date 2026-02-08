@@ -592,6 +592,26 @@ session_info() {
     tmux list-windows -t "$session" -F "#{window_index}:#{window_name}:#{window_active}"
 }
 
+# Capture pane output
+# Usage: capture_pane <session> <window> <pane> [lines]
+capture_pane() {
+    local session="$1"
+    local window="$2"
+    local pane="$3"
+    local lines="${4:-50}"
+
+    tmux capture-pane -t "${session}:${window}.${pane}" -p -S "-${lines}"
+}
+
+# List panes in a window with format info
+# Returns: index, active, current_command, width x height
+list_window_panes() {
+    local session="$1"
+    local window="$2"
+
+    tmux list-panes -t "${session}:${window}" -F "#{pane_index}:#{pane_active}:#{pane_current_command}:#{pane_width}x#{pane_height}" 2>/dev/null
+}
+
 # Send interrupt (Ctrl+C) to a pane
 interrupt_pane() {
     local session="$1"
