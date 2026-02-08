@@ -15,7 +15,9 @@ When working on multiple features/branches simultaneously, constantly switching 
 - **Port allocation**: Reserved ports for OAuth/Privy, hash-based dynamic ports
 - **Setup automation**: Run install scripts, copy envs, init submodules
 - **tmux integration**: Auto-create sessions with configured layouts
-- **Shell completions**: Tab-complete branch names
+- **Tmux integration**: Send commands, capture logs, list panes
+- **Diagnostics**: `wt doctor` validates config, state, and tmux health
+- **Shell completions**: Tab-complete commands, branches, and service names
 
 ## Installation
 
@@ -65,7 +67,11 @@ wt delete feature/my-feature
 | `wt stop <branch> --all` | `down` | Stop services |
 | `wt status <branch>` | `st` | Show worktree & service status |
 | `wt attach <branch>` | `a` | Attach to tmux session |
+| `wt send <branch> <svc> <cmd>` | `s` | Send command to a tmux pane |
+| `wt logs <branch> [svc]` | `log` | Capture tmux pane output |
+| `wt panes <branch>` | | List panes for a worktree |
 | `wt ports <branch>` | | Show port assignments |
+| `wt doctor` | `doc` | Run diagnostic checks |
 | `wt config --edit` | | Edit project config |
 
 ## Configuration
@@ -135,6 +141,44 @@ For services requiring specific ports (OAuth callbacks, Privy):
 
 Max 3 concurrent worktrees can use reserved ports. Dynamic services get deterministic hash-based ports.
 
+## Tmux Integration
+
+Once services are running in tmux, you can interact with panes directly:
+
+```bash
+# Send a command to a service pane
+wt send feature/auth api-server "npm restart"
+
+# View output from a specific pane
+wt logs feature/auth api-server --lines 100
+
+# View all pane output at once
+wt logs feature/auth --all
+
+# List pane layout and service mapping
+wt panes feature/auth
+```
+
+Inside a worktree directory, the branch is auto-detected:
+
+```bash
+cd ~/project/.worktrees/feature-auth
+wt send api-server "echo hello"    # branch auto-detected
+wt logs --all                       # branch auto-detected
+```
+
+## Diagnostics
+
+```bash
+# Run health checks on your setup
+wt doctor
+
+# Check a specific project
+wt doctor -p myproject
+```
+
+Doctor checks: dependencies (with versions), YAML config validity, port range overlaps, orphaned state entries, stale PIDs, tmux session health, and port conflicts.
+
 ## Tips
 
 - **Copy envs from main repo**: In setup steps, use `cp ../../../service/.env .env` to copy from the main repo's service directory
@@ -142,6 +186,8 @@ Max 3 concurrent worktrees can use reserved ports. Dynamic services get determin
 - **Custom tmux layout**: Use `layout: services-top` for services on top, main pane on bottom
 - **Skip setup**: `wt create <branch> --no-setup` to skip setup steps
 - **Run single step**: `wt run <branch> <step-name>` to re-run a setup step
+- **Debug panes**: `wt logs <branch> --all` to see all pane output at once
+- **Diagnose issues**: `wt doctor` to verify your config and runtime state
 
 ## File Structure
 
@@ -156,6 +202,27 @@ Max 3 concurrent worktrees can use reserved ports. Dynamic services get determin
     ├── slots.yaml           # Port slot assignments
     └── <project>.state.yaml # Worktree & service state
 ```
+
+## Testing
+
+```bash
+# Install test framework
+brew install bats-core
+
+# Run all tests
+bats tests/
+
+# Run a specific test file
+bats tests/test_utils.bats
+
+# Run with verbose output
+bats tests/ --verbose-run
+```
+
+Test coverage includes:
+- **Unit tests**: `utils.sh`, `port.sh`, `config.sh`, `state.sh`, `worktree.sh`
+- **Integration tests**: `doctor`, `send`, `logs`, `panes` commands
+- **End-to-end**: Full lifecycle with tmux session management
 
 ## License
 

@@ -509,6 +509,70 @@ hooks:
 
 ---
 
+## Tmux Integration Commands
+
+In addition to `wt start` and `wt attach`, these commands interact with tmux panes:
+
+### wt send
+
+Send a command to a specific pane by service name or pane index:
+
+```bash
+wt send feature/auth api-server "npm restart"
+wt send feature/auth 0 "ls -la"          # by pane index
+
+# Inside a worktree, branch is auto-detected:
+wt send api-server "echo hello"
+```
+
+### wt logs
+
+Capture and display output from tmux panes:
+
+```bash
+wt logs feature/auth api-server            # specific service
+wt logs feature/auth --all                  # all panes
+wt logs feature/auth api-server --lines 100 # last 100 lines
+```
+
+### wt panes
+
+List panes with service mapping, active status, and dimensions:
+
+```bash
+wt panes feature/auth
+```
+
+Output:
+
+```
+PANE   SERVICE/COMMAND      ACTIVE   SIZE
+------------------------------------------------------
+0      api-server           no       66x16
+1      frontend             no       66x16
+2      worker               no       66x16
+3      claude               yes      133x32
+4      bash                 no       33x32
+```
+
+### wt doctor
+
+Run diagnostic checks on your project setup:
+
+```bash
+wt doctor
+wt doctor -p myproject
+```
+
+Checks performed:
+1. **Dependencies** - git, yq, tmux, envsubst (with versions)
+2. **Project config** - YAML syntax, required fields, port ranges, service references
+3. **State consistency** - orphaned worktree entries, stale service PIDs
+4. **Tmux health** - session exists, windows match state
+5. **Port conflicts** - reserved/dynamic overlap, duplicate assignments
+
+---
+
 ## Tips
 
 1. **Port conflicts**: Use `wt ports <branch> --check` to verify ports before starting
@@ -516,3 +580,5 @@ hooks:
 3. **Skip setup**: Use `wt create <branch> --no-setup` to create without running setup
 4. **Debug**: Set `WT_DEBUG=1` for verbose logging
 5. **Submodules**: Reference parent repo with `../../` in setup commands (worktrees are in `.worktrees/<branch>/`)
+6. **Diagnose issues**: Run `wt doctor` to check config validity, state consistency, and tmux health
+7. **Debug panes**: Use `wt logs <branch> --all` to see output from all tmux panes at once
