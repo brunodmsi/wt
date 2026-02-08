@@ -2,7 +2,14 @@
 # lib/tmux.sh - tmux session management
 
 # Default session name (can be overridden in config)
-WT_TMUX_SESSION="${WT_TMUX_SESSION:-karma}"
+# Prefer current tmux session, fall back to "wt" if not inside tmux
+if [[ -z "${WT_TMUX_SESSION:-}" ]]; then
+    if [[ -n "${TMUX:-}" ]]; then
+        WT_TMUX_SESSION=$(tmux display-message -p '#S' 2>/dev/null) || WT_TMUX_SESSION="wt"
+    else
+        WT_TMUX_SESSION="wt"
+    fi
+fi
 
 # Check if tmux is available
 ensure_tmux() {
