@@ -40,6 +40,10 @@ source "${WT_SCRIPT_DIR}/commands/exec.sh"
 source "${WT_SCRIPT_DIR}/commands/init.sh"
 source "${WT_SCRIPT_DIR}/commands/config.sh"
 source "${WT_SCRIPT_DIR}/commands/ports.sh"
+source "${WT_SCRIPT_DIR}/commands/send.sh"
+source "${WT_SCRIPT_DIR}/commands/logs.sh"
+source "${WT_SCRIPT_DIR}/commands/panes.sh"
+source "${WT_SCRIPT_DIR}/commands/doctor.sh"
 
 # Show help
 show_help() {
@@ -62,10 +66,16 @@ ${BOLD}COMMANDS${NC}
     ${CYAN}Session Management${NC}
     attach, a       Attach to tmux session
 
+    ${CYAN}Tmux Integration${NC}
+    send, s         Send command to a tmux pane
+    logs, log       Capture pane output
+    panes           List panes for a worktree
+
     ${CYAN}Utilities${NC}
     run             Run a setup step
     exec            Execute command in worktree
     ports           Show port assignments
+    doctor, doc     Run diagnostic checks
 
     ${CYAN}Configuration${NC}
     init            Initialize project configuration
@@ -200,6 +210,18 @@ main() {
             ;;
         ports)
             cmd_ports "$@"
+            ;;
+        send|s)
+            cmd_send "$@"
+            ;;
+        logs|log)
+            cmd_logs "$@"
+            ;;
+        panes)
+            cmd_panes "$@"
+            ;;
+        doctor|doc)
+            cmd_doctor "$@"
             ;;
         *)
             log_error "Unknown command: $command"
