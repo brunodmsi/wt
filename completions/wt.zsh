@@ -25,6 +25,13 @@ _wt() {
         'run:Run a setup step'
         'exec:Execute command in worktree'
         'ports:Show port assignments'
+        'send:Send command to a tmux pane'
+        's:Send command (alias)'
+        'logs:Capture pane output'
+        'log:Capture pane output (alias)'
+        'panes:List panes for a worktree'
+        'doctor:Run diagnostic checks'
+        'doc:Run diagnostic checks (alias)'
         'init:Initialize project configuration'
         'config:View/edit configuration'
         'help:Show help'
@@ -51,6 +58,21 @@ _wt() {
         fi
     }
 
+    # Function to get service names
+    _wt_services() {
+        local project_dir="$HOME/.config/wt/projects"
+        local repo_root
+        repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || return
+        local project_name
+        project_name=$(basename "$repo_root")
+        local config="$project_dir/${project_name}.yaml"
+        if [[ -f "$config" ]] && (( $+commands[yq] )); then
+            local -a services
+            services=(${(f)"$(yq -r '.services[].name // empty' "$config" 2>/dev/null)"})
+            _describe 'service' services
+        fi
+    }
+
     # Main completion logic
     _arguments -C \
         '1: :->command' \
@@ -72,20 +94,20 @@ _wt() {
                     ;;
                 start|up)
                     _arguments \
-                        '(-s --service)'{-s,--service}'[Start specific service]:service:' \
+                        '(-s --service)'{-s,--service}'[Start specific service]:service:_wt_services' \
                         '(-a --all)'{-a,--all}'[Start all services]' \
                         '--attach[Attach to tmux after starting]' \
                         '(-p --project)'{-p,--project}'[Project name]:project:_wt_projects' \
                         '(-h --help)'{-h,--help}'[Show help]' \
-                        '1:worktree:_wt_worktrees'
+                        '*:worktree or service:_wt_worktrees'
                     ;;
                 stop|down)
                     _arguments \
-                        '(-s --service)'{-s,--service}'[Stop specific service]:service:' \
+                        '(-s --service)'{-s,--service}'[Stop specific service]:service:_wt_services' \
                         '(-a --all)'{-a,--all}'[Stop all services]' \
                         '(-p --project)'{-p,--project}'[Project name]:project:_wt_projects' \
                         '(-h --help)'{-h,--help}'[Show help]' \
-                        '1:worktree:_wt_worktrees'
+                        '*:worktree or service:_wt_worktrees'
                     ;;
                 delete|rm)
                     _arguments \
@@ -128,7 +150,35 @@ _wt() {
                         '(-c --check)'{-c,--check}'[Check port availability]' \
                         '(-p --project)'{-p,--project}'[Project name]:project:_wt_projects' \
                         '(-h --help)'{-h,--help}'[Show help]' \
+                        '1:subcommand or worktree:(set clear)'
+                    ;;
+                send|s)
+                    _arguments \
+                        '(-p --project)'{-p,--project}'[Project name]:project:_wt_projects' \
+                        '(-h --help)'{-h,--help}'[Show help]' \
+                        '1:worktree or service:_wt_worktrees' \
+                        '2:service:_wt_services' \
+                        '*:command:'
+                    ;;
+                logs|log)
+                    _arguments \
+                        '(-n --lines)'{-n,--lines}'[Number of lines]:lines:' \
+                        '(-a --all)'{-a,--all}'[Show all panes]' \
+                        '(-p --project)'{-p,--project}'[Project name]:project:_wt_projects' \
+                        '(-h --help)'{-h,--help}'[Show help]' \
+                        '1:worktree or service:_wt_worktrees' \
+                        '2:service:_wt_services'
+                    ;;
+                panes)
+                    _arguments \
+                        '(-p --project)'{-p,--project}'[Project name]:project:_wt_projects' \
+                        '(-h --help)'{-h,--help}'[Show help]' \
                         '1:worktree:_wt_worktrees'
+                    ;;
+                doctor|doc)
+                    _arguments \
+                        '(-p --project)'{-p,--project}'[Project name]:project:_wt_projects' \
+                        '(-h --help)'{-h,--help}'[Show help]'
                     ;;
                 list|ls)
                     _arguments \
