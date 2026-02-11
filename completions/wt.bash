@@ -61,16 +61,6 @@ _wt_completions() {
             COMPREPLY=()
             return
             ;;
-        -t|--template)
-            # Complete with template names
-            local templates=""
-            local wt_dir="${WT_SCRIPT_DIR:-$HOME/.local/share/wt}"
-            if [[ -d "$wt_dir/templates" ]]; then
-                templates=$(ls "$wt_dir/templates" 2>/dev/null | sed 's/\.yaml$//')
-            fi
-            COMPREPLY=($(compgen -W "$templates default" -- "$cur"))
-            return
-            ;;
         --lines|-n)
             # Numeric argument, no completion
             COMPREPLY=()
@@ -198,7 +188,7 @@ _wt_completions() {
             COMPREPLY=($(compgen -W "-p --project -s --status --json -h --help" -- "$cur"))
             ;;
         init)
-            COMPREPLY=($(compgen -W "-t --template -n --name -f --force -h --help" -- "$cur"))
+            COMPREPLY=($(compgen -W "-n --name -f --force -h --help" -- "$cur"))
             ;;
         config)
             COMPREPLY=($(compgen -W "-e --edit -g --global -p --project --path -h --help" -- "$cur"))

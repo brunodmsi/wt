@@ -2,18 +2,12 @@
 # commands/init.sh - Initialize project configuration
 
 cmd_init() {
-    local template="default"
     local project_name=""
     local force=0
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -t|--template)
-                [[ -z "${2:-}" ]] && { log_error "Option $1 requires an argument"; return 1; }
-                template="$2"
-                shift 2
-                ;;
             -n|--name)
                 [[ -z "${2:-}" ]] && { log_error "Option $1 requires an argument"; return 1; }
                 project_name="$2"
@@ -73,25 +67,10 @@ cmd_init() {
     # Ensure config directories exist
     init_config_dirs
 
-    # Get template
-    local template_file="$WT_SCRIPT_DIR/templates/${template}.yaml"
-
-    if [[ ! -f "$template_file" ]]; then
-        log_warn "Template '$template' not found, using inline default"
-        template_file=""
-    fi
-
     # Create configuration
     log_info "Creating configuration for project: $project_name"
 
-    if [[ -n "$template_file" ]]; then
-        cp "$template_file" "$config_file"
-        # Update project-specific values
-        yq -i ".name = \"$project_name\"" "$config_file"
-        yq -i ".repo_path = \"$repo_root\"" "$config_file"
-    else
-        # Create default config inline
-        cat > "$config_file" << EOF
+    cat > "$config_file" << EOF
 # Configuration for project: $project_name
 name: $project_name
 repo_path: $repo_root
@@ -149,7 +128,6 @@ hooks: {}
   # post_start: |
   #   echo "Services started!"
 EOF
-    fi
 
     # Add .worktrees to .gitignore
     local gitignore="$repo_root/.gitignore"
@@ -180,7 +158,6 @@ Usage: wt init [options]
 Initialize wt configuration for the current git repository.
 
 Options:
-  -t, --template    Template to use (default: default)
   -n, --name        Project name (default: directory name)
   -f, --force       Overwrite existing configuration
   -h, --help        Show this help message
@@ -188,7 +165,6 @@ Options:
 Examples:
   wt init
   wt init --name my-project
-  wt init --template monorepo
   wt init --force
 EOF
 }

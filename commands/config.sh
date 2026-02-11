@@ -69,15 +69,6 @@ defaults:
 # Editor to use for editing configs
 editor:
   default: "${EDITOR:-vim}"
-
-# Shell settings
-shell:
-  rc_file: "~/.zshrc"
-
-# Logging
-logging:
-  enabled: true
-  dir: "~/.local/share/wt/logs"
 EOF
             log_info "Created default global config"
         fi

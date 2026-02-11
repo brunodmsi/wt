@@ -281,24 +281,6 @@ get_service_by_index() {
     yaml_get "$config_file" ".services[$index].$field"
 }
 
-# Get reserved service offset
-get_reserved_service_offset() {
-    local config_file="$1"
-    local service_name="$2"
-
-    yaml_get "$config_file" ".ports.reserved.services.$service_name" ""
-}
-
-# Check if service uses dynamic port
-is_dynamic_service() {
-    local config_file="$1"
-    local service_name="$2"
-
-    local result
-    result=$(yaml_get "$config_file" ".ports.dynamic.services.$service_name" "")
-    [[ -n "$result" ]]
-}
-
 # Get environment variables from config
 get_env_vars() {
     local config_file="$1"

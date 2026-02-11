@@ -189,7 +189,6 @@ _wt() {
                     ;;
                 init)
                     _arguments \
-                        '(-t --template)'{-t,--template}'[Template to use]:template:(default monorepo)' \
                         '(-n --name)'{-n,--name}'[Project name]:name:' \
                         '(-f --force)'{-f,--force}'[Overwrite existing config]' \
                         '(-h --help)'{-h,--help}'[Show help]'

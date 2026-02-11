@@ -188,38 +188,6 @@ prune_worktrees() {
     git -C "$repo_root" worktree prune -v
 }
 
-# Get worktree info
-worktree_info() {
-    local branch="$1"
-    local repo_root="${2:-$(git_root)}"
-
-    local wt_path
-    wt_path=$(worktree_path "$branch" "$repo_root")
-
-    if [[ ! -d "$wt_path" ]]; then
-        return 1
-    fi
-
-    echo "path:$wt_path"
-    echo "branch:$branch"
-
-    # Get last commit info
-    local commit_hash
-    commit_hash=$(git -C "$wt_path" rev-parse --short HEAD 2>/dev/null)
-    echo "commit:$commit_hash"
-
-    local commit_msg
-    commit_msg=$(git -C "$wt_path" log -1 --format="%s" 2>/dev/null)
-    echo "message:$commit_msg"
-
-    # Check if dirty
-    if [[ -n $(git -C "$wt_path" status --porcelain 2>/dev/null) ]]; then
-        echo "dirty:true"
-    else
-        echo "dirty:false"
-    fi
-}
-
 # Execute a command in worktree context
 exec_in_worktree() {
     local branch="$1"

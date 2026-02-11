@@ -188,22 +188,6 @@ port_in_use() {
     lsof -i ":$port" &>/dev/null
 }
 
-# Wait for port to be available
-wait_for_port() {
-    local port="$1"
-    local timeout="${2:-30}"
-    local elapsed=0
-
-    while ! nc -z localhost "$port" 2>/dev/null; do
-        if (( elapsed >= timeout )); then
-            return 1
-        fi
-        sleep 1
-        ((elapsed++))
-    done
-    return 0
-}
-
 # Pretty print a key-value pair
 print_kv() {
     local key="$1"
@@ -235,52 +219,3 @@ timestamp() {
     date -u +"%Y-%m-%dT%H:%M:%SZ"
 }
 
-# Parse flags from arguments
-# Usage: parse_flags "$@"
-# Sets global variables for common flags
-parse_flags() {
-    VERBOSE=0
-    QUIET=0
-    DRY_RUN=0
-    FORCE=0
-    POSITIONAL=()
-
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            -v|--verbose)
-                VERBOSE=1
-                shift
-                ;;
-            -q|--quiet)
-                QUIET=1
-                shift
-                ;;
-            --dry-run)
-                DRY_RUN=1
-                shift
-                ;;
-            -f|--force)
-                FORCE=1
-                shift
-                ;;
-            -h|--help)
-                SHOW_HELP=1
-                shift
-                ;;
-            --)
-                shift
-                POSITIONAL+=("$@")
-                break
-                ;;
-            -*)
-                # Unknown flag, let command handle it
-                POSITIONAL+=("$1")
-                shift
-                ;;
-            *)
-                POSITIONAL+=("$1")
-                shift
-                ;;
-        esac
-    done
-}
