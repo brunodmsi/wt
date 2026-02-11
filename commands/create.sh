@@ -62,6 +62,10 @@ cmd_create() {
         die "Worktree already exists for branch: $branch"
     fi
 
+    # Run pre_create hook if defined
+    export BRANCH_NAME="$branch"
+    run_hook "$PROJECT_CONFIG_FILE" "pre_create"
+
     # Track state for cleanup on interrupt
     local _create_cleanup_project=""
     local _create_cleanup_branch=""

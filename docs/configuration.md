@@ -333,23 +333,35 @@ tmux:
 
 The `hooks` section defines scripts run at specific lifecycle events.
 
-| Hook | Trigger |
-|------|---------|
-| `post_create` | After worktree creation and setup |
-| `post_start` | After all services started |
-| `pre_delete` | Before worktree deletion |
-| `post_delete` | After worktree deletion |
+| Hook | Trigger | Available Variables |
+|------|---------|---------------------|
+| `pre_create` | Before worktree creation (after config validation) | `BRANCH_NAME` |
+| `post_create` | After worktree creation and setup | `BRANCH_NAME`, `WORKTREE_PATH`, `PORT_*` |
+| `pre_start` | Before services are started | `BRANCH_NAME`, `WORKTREE_PATH`, `PORT_*` |
+| `post_start` | After all services started | `BRANCH_NAME`, `WORKTREE_PATH`, `PORT_*` |
+| `post_stop` | After services are stopped | `BRANCH_NAME` |
+| `pre_delete` | Before worktree deletion | `BRANCH_NAME`, `WORKTREE_PATH` |
+| `post_delete` | After worktree deletion | `BRANCH_NAME`, `WORKTREE_PATH` |
 
 Hooks have access to all environment variables including:
 - `BRANCH_NAME` - Current branch/worktree name
-- `PORT_*` - All exported port variables
+- `WORKTREE_PATH` - Path to the worktree directory
+- `PORT_*` - All exported port variables (when available)
+
+If a hook exits with a non-zero status, a warning is logged but execution continues.
 
 ```yaml
 hooks:
+  pre_create: |
+    echo "Creating worktree for ${BRANCH_NAME}..."
+
   post_create: |
     echo ""
     echo "Worktree ready!"
     echo "Ports: API=${PORT_API_SERVER}, Frontend=${PORT_FRONTEND}"
+
+  pre_start: |
+    docker start postgres redis 2>/dev/null || true
 
   post_start: |
     echo ""
@@ -357,9 +369,15 @@ hooks:
     echo "  API: http://localhost:${PORT_API_SERVER}"
     echo "  App: http://localhost:${PORT_FRONTEND}"
 
+  post_stop: |
+    echo "Services stopped for ${BRANCH_NAME}"
+
   pre_delete: |
     echo "Cleaning up ${BRANCH_NAME}..."
     docker-compose down 2>/dev/null || true
+
+  post_delete: |
+    echo "Worktree deleted for ${BRANCH_NAME}"
 ```
 
 ---

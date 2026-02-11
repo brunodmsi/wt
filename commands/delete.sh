@@ -92,6 +92,9 @@ cmd_delete() {
     # Delete state
     delete_worktree_state "$project" "$branch"
 
+    # Run post_delete hook if defined
+    run_hook "$PROJECT_CONFIG_FILE" "post_delete"
+
     log_success "Worktree deleted: $branch"
 }
 

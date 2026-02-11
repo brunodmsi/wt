@@ -119,6 +119,11 @@ cmd_start() {
     # Clean up stale service states
     cleanup_stale_services "$project" "$branch"
 
+    # Run pre_start hook if defined
+    export BRANCH_NAME="$branch"
+    export WORKTREE_PATH="$(get_worktree_path "$project" "$branch")"
+    run_hook "$PROJECT_CONFIG_FILE" "pre_start"
+
     # Start services
     local failed=0
     if [[ "$all" -eq 1 ]]; then
@@ -145,6 +150,7 @@ cmd_start() {
 
     # Run post_start hook if defined
     export BRANCH_NAME="$branch"
+    export WORKTREE_PATH="$(get_worktree_path "$project" "$branch")"
     run_hook "$PROJECT_CONFIG_FILE" "post_start"
 
     # Optionally attach

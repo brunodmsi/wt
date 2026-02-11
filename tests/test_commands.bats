@@ -359,3 +359,151 @@ hooks:
     [[ "$port2" == "3002" ]]
     [[ "$port1" != "$port2" ]]
 }
+
+# ===== lifecycle hooks =====
+
+# Helper: create config with all hooks that write marker files
+_create_hooks_config() {
+    local project="${1:-hookproj}"
+    create_yaml_fixture "$WT_PROJECTS_DIR/${project}.yaml" "name: $project
+repo_path: $TEST_REPO
+ports:
+  reserved:
+    range: { min: 3000, max: 3010 }
+    slots: 3
+    services:
+      web: 0
+  dynamic:
+    range: { min: 4000, max: 5000 }
+    services: {}
+services:
+  - name: web
+    command: echo running
+    working_dir: .
+    port_key: web
+setup: []
+tmux:
+  session: wt-test-cmd
+  layout: tiled
+  windows:
+    - name: dev
+      panes:
+        - service: web
+        - command: echo shell
+hooks:
+  pre_create: touch $TEST_TMPDIR/pre-create-marker
+  post_create: touch $TEST_TMPDIR/post-create-marker
+  pre_start: touch $TEST_TMPDIR/pre-start-marker
+  post_start: touch $TEST_TMPDIR/post-start-marker
+  post_stop: touch $TEST_TMPDIR/post-stop-marker
+  pre_delete: touch $TEST_TMPDIR/pre-delete-marker
+  post_delete: touch $TEST_TMPDIR/post-delete-marker"
+}
+
+@test "hooks: pre_create runs before worktree creation" {
+    _create_hooks_config "hookproj"
+    load_project_config "hookproj"
+
+    export BRANCH_NAME="feature/hook-test"
+    run_hook "$PROJECT_CONFIG_FILE" "pre_create"
+
+    [[ -f "$TEST_TMPDIR/pre-create-marker" ]]
+}
+
+@test "hooks: post_create runs after worktree creation" {
+    _create_hooks_config "hookproj"
+    load_project_config "hookproj"
+
+    export BRANCH_NAME="feature/hook-test"
+    export WORKTREE_PATH="$TEST_REPO"
+    run_hook "$PROJECT_CONFIG_FILE" "post_create"
+
+    [[ -f "$TEST_TMPDIR/post-create-marker" ]]
+}
+
+@test "hooks: pre_start runs before services start" {
+    _create_hooks_config "hookproj"
+    load_project_config "hookproj"
+
+    export BRANCH_NAME="feature/hook-test"
+    export WORKTREE_PATH="$TEST_REPO"
+    run_hook "$PROJECT_CONFIG_FILE" "pre_start"
+
+    [[ -f "$TEST_TMPDIR/pre-start-marker" ]]
+}
+
+@test "hooks: post_start runs after services start" {
+    _create_hooks_config "hookproj"
+    load_project_config "hookproj"
+
+    export BRANCH_NAME="feature/hook-test"
+    export WORKTREE_PATH="$TEST_REPO"
+    run_hook "$PROJECT_CONFIG_FILE" "post_start"
+
+    [[ -f "$TEST_TMPDIR/post-start-marker" ]]
+}
+
+@test "hooks: post_stop runs after services stop" {
+    _create_hooks_config "hookproj"
+    load_project_config "hookproj"
+
+    export BRANCH_NAME="feature/hook-test"
+    run_hook "$PROJECT_CONFIG_FILE" "post_stop"
+
+    [[ -f "$TEST_TMPDIR/post-stop-marker" ]]
+}
+
+@test "hooks: pre_delete runs before worktree deletion" {
+    _create_hooks_config "hookproj"
+    load_project_config "hookproj"
+
+    export BRANCH_NAME="feature/hook-test"
+    export WORKTREE_PATH="$TEST_REPO"
+    run_hook "$PROJECT_CONFIG_FILE" "pre_delete"
+
+    [[ -f "$TEST_TMPDIR/pre-delete-marker" ]]
+}
+
+@test "hooks: post_delete runs after worktree deletion" {
+    _create_hooks_config "hookproj"
+    load_project_config "hookproj"
+
+    export BRANCH_NAME="feature/hook-test"
+    export WORKTREE_PATH="$TEST_REPO"
+    run_hook "$PROJECT_CONFIG_FILE" "post_delete"
+
+    [[ -f "$TEST_TMPDIR/post-delete-marker" ]]
+}
+
+@test "hooks: pre_create has BRANCH_NAME in environment" {
+    local marker="$TEST_TMPDIR/branch-env-marker"
+    local project="hookenvproj"
+    create_yaml_fixture "$WT_PROJECTS_DIR/${project}.yaml" "name: $project
+repo_path: $TEST_REPO
+ports:
+  reserved:
+    range: { min: 3000, max: 3010 }
+    slots: 3
+    services: {}
+  dynamic:
+    range: { min: 4000, max: 5000 }
+    services: {}
+services: []
+setup: []
+tmux:
+  session: wt-test-cmd
+  layout: tiled
+  windows:
+    - name: dev
+      panes:
+        - command: ''
+hooks:
+  pre_create: echo \$BRANCH_NAME > $marker"
+
+    load_project_config "$project"
+    export BRANCH_NAME="feature/env-check"
+    run_hook "$PROJECT_CONFIG_FILE" "pre_create"
+
+    [[ -f "$marker" ]]
+    [[ "$(cat "$marker")" == "feature/env-check" ]]
+}

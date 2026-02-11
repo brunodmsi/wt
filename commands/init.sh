@@ -121,12 +121,22 @@ tmux:
       panes:
         - ""
 
-# Hooks
+# Hooks (lifecycle events)
 hooks: {}
+  # pre_create: |
+  #   echo "About to create worktree for \${BRANCH_NAME}"
   # post_create: |
-  #   echo "Worktree created!"
+  #   echo "Worktree created at \${WORKTREE_PATH}"
+  # pre_start: |
+  #   echo "About to start services for \${BRANCH_NAME}"
   # post_start: |
-  #   echo "Services started!"
+  #   echo "Services started for \${BRANCH_NAME}"
+  # post_stop: |
+  #   echo "Services stopped for \${BRANCH_NAME}"
+  # pre_delete: |
+  #   echo "About to delete \${WORKTREE_PATH}"
+  # post_delete: |
+  #   echo "Worktree deleted for \${BRANCH_NAME}"
 EOF
 
     # Add .worktrees to .gitignore

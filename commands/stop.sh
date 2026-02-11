@@ -91,6 +91,10 @@ cmd_stop() {
         show_stop_help
         return 1
     fi
+
+    # Run post_stop hook if defined
+    export BRANCH_NAME="$branch"
+    run_hook "$PROJECT_CONFIG_FILE" "post_stop"
 }
 
 show_stop_help() {
