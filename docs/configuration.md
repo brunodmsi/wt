@@ -267,7 +267,8 @@ The `tmux` section defines how tmux windows and panes are created for each workt
 | `even-vertical` | Equal-height vertical panes |
 | `main-horizontal` | Large pane on top, others below |
 | `main-vertical` | Large pane on left, others right |
-| `services-top` | **Custom**: Services on top row (35%), main panes on bottom (65%) |
+| `services-top` | **Custom**: 3 services on top row (35%), 2 command panes on bottom (65%) |
+| `services-top-2` | **Custom**: 2 services on top row (35%), 2 command panes on bottom (65%) |
 
 #### services-top Layout
 
@@ -280,6 +281,20 @@ The `services-top` layout creates a specific arrangement for development workflo
 |     main (80%)      |  aux(20%)|  <- 65% height (command panes)
 +---------------------+----------+
 ```
+
+#### services-top-2 Layout
+
+The `services-top-2` layout is a variant for 2-service workflows:
+
+```
++----------+----------+
+| svc1 50% | svc2 50% |  <- 35% height (service panes)
++----------+----------+
+| main 65% | aux  35% |  <- 65% height (command panes)
++----------+----------+
+```
+
+4 panes total: 2 service panes (top row), 2 command panes (bottom row).
 
 #### Window Configuration
 

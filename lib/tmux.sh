@@ -141,9 +141,13 @@ setup_window_panes_for_worktree() {
         return
     fi
 
-    # Check for custom layout: "services-top"
+    # Check for custom layouts
     if [[ "$layout" == "services-top" ]] && [[ "$pane_count" -gt 1 ]]; then
         setup_services_top_layout_window "$session" "$window" "$root_dir" "$config_file" "$pane_count"
+        return
+    fi
+    if [[ "$layout" == "services-top-2" ]] && [[ "$pane_count" -gt 1 ]]; then
+        setup_services_top_2_layout_window "$session" "$window" "$root_dir" "$config_file" "$pane_count"
         return
     fi
 
@@ -169,6 +173,18 @@ setup_services_top_layout_window() {
 
     # Delegate to the main function with win_idx=0
     setup_services_top_layout "$session" "$window" "$root_dir" "$config_file" "0" "$pane_count"
+}
+
+# Wrapper for worktree window layout - delegates to setup_services_top_2_layout with win_idx=0
+setup_services_top_2_layout_window() {
+    local session="$1"
+    local window="$2"
+    local root_dir="$3"
+    local config_file="$4"
+    local pane_count="$5"
+
+    # Delegate to the main function with win_idx=0
+    setup_services_top_2_layout "$session" "$window" "$root_dir" "$config_file" "0" "$pane_count"
 }
 
 # Configure panes in a window
@@ -287,9 +303,13 @@ setup_window_panes() {
         return
     fi
 
-    # Check for custom layout: "services-top" puts N-1 panes on top row, last pane full-width bottom
+    # Check for custom layouts
     if [[ "$layout" == "services-top" ]] && [[ "$pane_count" -gt 1 ]]; then
         setup_services_top_layout "$session" "$window" "$root_dir" "$config_file" "$win_idx" "$pane_count"
+        return
+    fi
+    if [[ "$layout" == "services-top-2" ]] && [[ "$pane_count" -gt 1 ]]; then
+        setup_services_top_2_layout "$session" "$window" "$root_dir" "$config_file" "$win_idx" "$pane_count"
         return
     fi
 
@@ -405,6 +425,84 @@ setup_services_top_layout() {
 
     # Select claude pane (pane 3 = bottom-left) as active
     tmux select-pane -t "${session}:${window}.3"
+}
+
+# Custom layout: 2 services on top, 2 command panes on bottom
+# +----------+----------+
+# | svc1 50% | svc2 50% |  <- 35% height
+# +----------+----------+
+# | claude 65% | wt 35% |  <- 65% height
+# +----------+----------+
+setup_services_top_2_layout() {
+    local session="$1"
+    local window="$2"
+    local root_dir="$3"
+    local config_file="$4"
+    local win_idx="$5"
+    local pane_count="$6"
+
+    # Pre-fetch all pane configs and service working dirs in 2 yq calls
+    local all_pane_data
+    all_pane_data=$(yq -r ".tmux.windows[$win_idx].panes[] | [.service // \"\", .command // \"\"] | @tsv" "$config_file" 2>/dev/null)
+
+    local all_svc_dirs
+    all_svc_dirs=$(yq -r '.services[] | [.name, .working_dir // ""] | @tsv' "$config_file" 2>/dev/null)
+
+    # Split sequence:
+    # Split 1: vertical split - creates bottom pane (65%)
+    # After: pane 0 = top, pane 1 = bottom
+    tmux split-window -t "${session}:${window}.0" -v -p 65
+
+    # Split 2: horizontal split of top (pane 0) for service 2 (50%)
+    # After: pane 0 = top-left, pane 1 = top-right, pane 2 = bottom
+    tmux split-window -t "${session}:${window}.0" -h -p 50
+
+    # Split 3: horizontal split of bottom (pane 2) for wt pane (35%)
+    # After: pane 0 = top-left, pane 1 = top-right, pane 2 = bottom-left, pane 3 = bottom-right
+    tmux split-window -t "${session}:${window}.2" -h -p 35
+
+    # Pane mapping after splits (tmux renumbers by visual position):
+    # Pane 0 = top-left (config 0 = service 1)
+    # Pane 1 = top-right (config 1 = service 2)
+    # Pane 2 = bottom-left (config 2 = claude)
+    # Pane 3 = bottom-right (config 3 = wt)
+
+    local -a pane_map=(0 1 2 3)
+
+    # Configure each pane using pre-fetched data
+    local p=0
+    while IFS=$'\t' read -r pane_service pane_cmd; do
+        [[ $p -ge $pane_count ]] && break
+        local tmux_pane="${pane_map[$p]}"
+
+        if [[ -n "$pane_service" ]] && [[ "$pane_service" != "null" ]]; then
+            local svc_working_dir=""
+            while IFS=$'\t' read -r svc_name svc_dir; do
+                if [[ "$svc_name" == "$pane_service" ]]; then
+                    svc_working_dir="$svc_dir"
+                    break
+                fi
+            done <<< "$all_svc_dirs"
+
+            if [[ -n "$svc_working_dir" ]] && [[ "$svc_working_dir" != "null" ]] && [[ -n "$root_dir" ]]; then
+                tmux send-keys -t "${session}:${window}.${tmux_pane}" "cd '$root_dir/$svc_working_dir'" Enter
+            fi
+            tmux send-keys -t "${session}:${window}.${tmux_pane}" "# Service: $pane_service (use 'wt start' to run)" Enter
+        elif [[ -n "$pane_cmd" ]] && [[ "$pane_cmd" != "null" ]] && [[ "$pane_cmd" != "" ]]; then
+            if [[ -n "$root_dir" ]]; then
+                tmux send-keys -t "${session}:${window}.${tmux_pane}" "cd '$root_dir'" Enter
+            fi
+            tmux send-keys -t "${session}:${window}.${tmux_pane}" "$pane_cmd" Enter
+        else
+            if [[ -n "$root_dir" ]]; then
+                tmux send-keys -t "${session}:${window}.${tmux_pane}" "cd '$root_dir'" Enter
+            fi
+        fi
+        p=$((p + 1))
+    done <<< "$all_pane_data"
+
+    # Select claude pane (pane 2 = bottom-left) as active
+    tmux select-pane -t "${session}:${window}.2"
 }
 
 # Configure panes with commands/services
