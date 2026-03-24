@@ -94,6 +94,58 @@ teardown() {
     [[ "$result" == "stopped" ]]
 }
 
+# --- stop_service / stop_all_services graceful error handling ---
+
+@test "stop_service does not abort when pane index not found" {
+    create_worktree_state "testproj" "main" "/tmp" 0
+    update_service_status "testproj" "main" "api" "running" "" "3000"
+
+    create_yaml_fixture "$TEST_TMPDIR/config.yaml" 'services:
+  - name: api
+    command: echo hi
+tmux:
+  session: test
+  windows:
+    - name: dev
+      panes:
+        - command: echo shell'
+
+    # stop_service should not abort even though api is not in pane config
+    # (tmux commands will fail since no session exists, but the function should
+    # still reach the state update)
+    run stop_service "testproj" "main" "api" "$TEST_TMPDIR/config.yaml"
+    [[ "$status" -eq 0 ]]
+
+    result=$(get_service_status "testproj" "main" "api")
+    [[ "$result" == "stopped" ]]
+}
+
+@test "stop_all_services stops all services even if one fails to find pane" {
+    create_worktree_state "testproj" "main" "/tmp" 0
+    update_service_status "testproj" "main" "api" "running" "" "3000"
+    update_service_status "testproj" "main" "web" "running" "" "3001"
+
+    # Neither service is mapped to a pane
+    create_yaml_fixture "$TEST_TMPDIR/config.yaml" 'services:
+  - name: api
+    command: echo api
+  - name: web
+    command: echo web
+tmux:
+  session: test
+  windows:
+    - name: dev
+      panes:
+        - command: echo shell'
+
+    stop_all_services "testproj" "main" "$TEST_TMPDIR/config.yaml" 2>/dev/null || true
+
+    result_api=$(get_service_status "testproj" "main" "api")
+    result_web=$(get_service_status "testproj" "main" "web")
+    [[ "$result_api" == "stopped" ]]
+    [[ "$result_web" == "stopped" ]]
+}
+
 # --- service start/stop require tmux, tested in e2e ---
 # These are integration-level tests that need tmux sessions.
 # The core logic is verified through the state and port tests above.

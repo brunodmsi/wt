@@ -161,7 +161,7 @@ start_service() {
 
     # Find pane for this service within the worktree window
     local pane_idx
-    pane_idx=$(find_service_pane_index "$config_file" "$service_name")
+    pane_idx=$(find_service_pane_index "$config_file" "$service_name") || true
 
     if [[ -n "$pane_idx" ]]; then
         # Send command to the service pane with all env vars
@@ -204,15 +204,15 @@ stop_service() {
 
     # Find pane for this service within the worktree window
     local pane_idx
-    pane_idx=$(find_service_pane_index "$config_file" "$service_name")
+    pane_idx=$(find_service_pane_index "$config_file" "$service_name") || true
 
     if [[ -n "$pane_idx" ]]; then
         # Interrupt the service pane
-        interrupt_pane "$tmux_session" "${window_name}.${pane_idx}"
+        interrupt_pane "$tmux_session" "${window_name}.${pane_idx}" 2>/dev/null || true
     else
         # Try service-named window (fallback for services started without pane config)
         if tmux list-windows -t "$tmux_session" -F "#{window_name}" 2>/dev/null | grep -q "^${window_name}-${service_name}$"; then
-            interrupt_pane "$tmux_session" "${window_name}-${service_name}"
+            interrupt_pane "$tmux_session" "${window_name}-${service_name}" 2>/dev/null || true
         fi
     fi
 
@@ -231,7 +231,7 @@ start_all_services() {
 
     # Pre-fetch all service names in one yq call
     local service_names
-    service_names=$(yq -r '.services[].name // empty' "$config_file" 2>/dev/null)
+    service_names=$(yq -r '.services[].name' "$config_file" 2>/dev/null)
 
     if [[ -z "$service_names" ]]; then
         log_info "No services configured"
@@ -273,7 +273,7 @@ stop_all_services() {
 
     # Pre-fetch all service names in one yq call
     local service_names
-    service_names=$(yq -r '.services[].name // empty' "$config_file" 2>/dev/null)
+    service_names=$(yq -r '.services[].name' "$config_file" 2>/dev/null)
 
     if [[ -z "$service_names" ]]; then
         return 0
@@ -284,10 +284,18 @@ stop_all_services() {
 
     log_info "Stopping $service_count services..."
 
+    local failed=0
     while read -r name; do
         [[ -z "$name" ]] && continue
-        stop_service "$project" "$branch" "$name" "$config_file"
+        if ! stop_service "$project" "$branch" "$name" "$config_file"; then
+            ((failed++))
+        fi
     done <<< "$service_names"
+
+    if [[ "$failed" -gt 0 ]]; then
+        log_warn "$failed service(s) failed to stop"
+        return 1
+    fi
 
     log_success "All services stopped"
 }
