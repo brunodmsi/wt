@@ -154,6 +154,18 @@ hooks:
     [[ "$output" == *"web"* ]] || [[ "$output" == *"3000"* ]]
 }
 
+@test "ports: auto-detects branch from current git branch" {
+    _create_test_config "testproj"
+    load_project_config "testproj"
+    create_worktree_state "testproj" "main" "$TEST_REPO" 0
+    claim_slot "testproj" "main" 3
+    cd "$TEST_REPO"
+    run cmd_ports -p "testproj" 2>&1
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *"Using current branch"* ]]
+    [[ "$output" == *"web"* ]] || [[ "$output" == *"3000"* ]]
+}
+
 @test "ports: set subcommand creates override" {
     _create_test_config "testproj"
     load_project_config "testproj"

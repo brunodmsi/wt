@@ -104,10 +104,15 @@ cmd_ports() {
         esac
     done
 
+    # Auto-detect branch from current git branch if not specified
     if [[ -z "$branch" ]]; then
-        log_error "Branch name is required"
-        show_ports_help
-        return 1
+        branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+        if [[ -z "$branch" ]]; then
+            log_error "Branch name is required (could not auto-detect)"
+            show_ports_help
+            return 1
+        fi
+        log_info "Using current branch: $branch"
     fi
 
     project=$(require_project "$project")
@@ -199,7 +204,7 @@ cmd_ports() {
 
 show_ports_help() {
     cat << 'EOF'
-Usage: wt ports <branch> [options]
+Usage: wt ports [branch] [options]
        wt ports set <service> <port> [branch] [options]
        wt ports clear <service> [branch] [options]
 
@@ -210,7 +215,7 @@ Subcommands:
   clear <service>        Remove port override for a service
 
 Arguments:
-  <branch>          Branch name of the worktree
+  [branch]          Branch name of the worktree (defaults to current branch)
 
 Options:
   -c, --check       Check if ports are currently in use
