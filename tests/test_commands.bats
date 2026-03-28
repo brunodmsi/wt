@@ -297,6 +297,85 @@ hooks:
     [[ "$(get_worktree_state "testproj" "feature/lifecycle" "path")" == "" ]]
 }
 
+@test "delete: releases slot when worktree directory is missing" {
+    _create_test_config "testproj"
+    load_project_config "testproj"
+
+    # Simulate a worktree that was created but whose directory was removed externally
+    local wt_path
+    wt_path=$(create_worktree "feature/orphaned" "" "$TEST_REPO" 2>/dev/null)
+    local slot
+    slot=$(claim_slot "testproj" "feature/orphaned" 3)
+    create_worktree_state "testproj" "feature/orphaned" "$wt_path" "$slot"
+
+    # Manually remove the worktree directory (simulating external deletion)
+    rm -rf "$wt_path"
+    git -C "$TEST_REPO" worktree prune 2>/dev/null
+
+    # Verify slot is still claimed
+    [[ "$(get_slot_for_worktree "testproj" "feature/orphaned")" == "$slot" ]]
+
+    # Simulate what cmd_delete does: detect missing dir, still clean up slot + state
+    release_slot "testproj" "feature/orphaned"
+    delete_worktree_state "testproj" "feature/orphaned"
+
+    # Verify slot is freed and state is cleaned
+    [[ "$(get_slot_for_worktree "testproj" "feature/orphaned")" == "" ]]
+    [[ "$(get_worktree_state "testproj" "feature/orphaned" "path")" == "" ]]
+
+    # Verify the slot can be reused
+    local new_slot
+    new_slot=$(claim_slot "testproj" "feature/reuse" 3)
+    [[ "$new_slot" == "$slot" ]]
+}
+
+@test "delete: dies with no state and no directory" {
+    _create_test_config "testproj"
+    load_project_config "testproj"
+
+    # Branch has no worktree, no state, no slot — should fail
+    run bash -c '
+        source "$WT_SCRIPT_DIR/lib/utils.sh"
+        source "$WT_SCRIPT_DIR/lib/config.sh"
+        source "$WT_SCRIPT_DIR/lib/port.sh"
+        source "$WT_SCRIPT_DIR/lib/state.sh"
+        source "$WT_SCRIPT_DIR/lib/worktree.sh"
+        source "$WT_SCRIPT_DIR/lib/setup.sh"
+        source "$WT_SCRIPT_DIR/lib/tmux.sh"
+        source "$WT_SCRIPT_DIR/lib/service.sh"
+        source "$WT_SCRIPT_DIR/commands/delete.sh"
+        export WT_STATE_DIR="'"$WT_STATE_DIR"'"
+        export WT_PROJECTS_DIR="'"$WT_PROJECTS_DIR"'"
+        cmd_delete -f -p testproj "feature/nonexistent"
+    '
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"not found"* ]]
+}
+
+@test "delete: cleans up orphaned slot when directory missing" {
+    _create_test_config "testproj"
+    load_project_config "testproj"
+
+    # Claim all slots
+    claim_slot "testproj" "feature/a" 2
+    claim_slot "testproj" "feature/b" 2
+    create_worktree_state "testproj" "feature/a" "/nonexistent/path/a" 0
+    create_worktree_state "testproj" "feature/b" "/nonexistent/path/b" 1
+
+    # No more slots available
+    run claim_slot "testproj" "feature/c" 2
+    [[ "$status" -ne 0 ]]
+
+    # Release one orphaned slot
+    release_slot "testproj" "feature/a"
+    delete_worktree_state "testproj" "feature/a"
+
+    # Now a slot should be available
+    local new_slot
+    new_slot=$(claim_slot "testproj" "feature/c" 2)
+    [[ "$new_slot" == "0" ]]
+}
+
 # ===== exec with port env vars =====
 
 @test "exec: exports port variables" {

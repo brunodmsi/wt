@@ -52,9 +52,19 @@ cmd_delete() {
 
     local repo_root="$PROJECT_REPO_PATH"
 
-    # Check if worktree exists
+    # Check if worktree exists on disk
+    local wt_on_disk=1
     if ! worktree_exists "$branch" "$repo_root"; then
-        die "Worktree not found for branch: $branch"
+        wt_on_disk=0
+        # Check if there's orphaned state or slot to clean up
+        local has_state
+        has_state=$(get_worktree_state "$project" "$branch" "path")
+        local has_slot
+        has_slot=$(get_slot_for_worktree "$project" "$branch")
+        if [[ -z "$has_state" ]] && [[ -z "$has_slot" ]]; then
+            die "Worktree not found for branch: $branch"
+        fi
+        log_warn "Worktree directory not found, cleaning up orphaned state..."
     fi
 
     # Confirmation
@@ -81,9 +91,11 @@ cmd_delete() {
     export BRANCH_NAME="$branch"
     run_hook "$PROJECT_CONFIG_FILE" "pre_delete"
 
-    # Remove worktree
-    if ! remove_worktree "$branch" "$force" "$keep_branch" "$repo_root"; then
-        die "Failed to remove worktree"
+    # Remove worktree (only if it exists on disk)
+    if [[ "$wt_on_disk" -eq 1 ]]; then
+        if ! remove_worktree "$branch" "$force" "$keep_branch" "$repo_root"; then
+            die "Failed to remove worktree"
+        fi
     fi
 
     # Release slot
