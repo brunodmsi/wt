@@ -164,6 +164,14 @@ teardown() {
     [[ "$slot" == "0" ]]
 }
 
+@test "release_slot frees slot for reuse with slash branches" {
+    claim_slot "testproj" "feature/auth" 2
+    claim_slot "testproj" "feature/payments" 2
+    release_slot "testproj" "feature/auth"
+    slot=$(claim_slot "testproj" "feature/new" 2)
+    [[ "$slot" == "0" ]]
+}
+
 @test "release_slot is no-op for missing file" {
     release_slot "testproj" "nonexistent"
     # Should not error

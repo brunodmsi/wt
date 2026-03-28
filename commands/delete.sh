@@ -52,9 +52,24 @@ cmd_delete() {
 
     local repo_root="$PROJECT_REPO_PATH"
 
-    # Check if worktree exists
+    local wt_path
+    wt_path=$(worktree_path "$branch" "$repo_root")
+
+    # Check if worktree exists on disk
+    local worktree_on_disk=1
     if ! worktree_exists "$branch" "$repo_root"; then
-        die "Worktree not found for branch: $branch"
+        # Worktree directory is gone — check if we still have slot/state to clean up
+        local has_slot
+        has_slot=$(get_slot_for_worktree "$project" "$branch")
+        local has_state
+        has_state=$(get_worktree_state "$project" "$branch" "branch")
+
+        if [[ -z "$has_slot" ]] && [[ -z "$has_state" ]]; then
+            die "Worktree not found for branch: $branch"
+        fi
+
+        worktree_on_disk=0
+        log_warn "Worktree directory missing, cleaning up slot and state for: $branch"
     fi
 
     # Confirmation
@@ -72,25 +87,25 @@ cmd_delete() {
     # Kill tmux window
     local window_name
     window_name=$(get_session_name "$project" "$branch")
-    kill_session "$window_name" "$PROJECT_CONFIG_FILE"
+    kill_session "$window_name" "$PROJECT_CONFIG_FILE" 2>/dev/null || true
 
     # Run pre_delete hook if defined
-    local wt_path
-    wt_path=$(worktree_path "$branch" "$repo_root")
     export WORKTREE_PATH="$wt_path"
     export BRANCH_NAME="$branch"
     run_hook "$PROJECT_CONFIG_FILE" "pre_delete"
 
-    # Remove worktree
-    if ! remove_worktree "$branch" "$force" "$keep_branch" "$repo_root"; then
-        die "Failed to remove worktree"
+    # Remove worktree (only if it still exists on disk)
+    if [[ "$worktree_on_disk" -eq 1 ]]; then
+        if ! remove_worktree "$branch" "$force" "$keep_branch" "$repo_root"; then
+            die "Failed to remove worktree"
+        fi
     fi
 
-    # Release slot
-    release_slot "$project" "$branch"
+    # Release slot — always attempt even if earlier steps had issues
+    release_slot "$project" "$branch" 2>/dev/null || true
 
     # Delete state
-    delete_worktree_state "$project" "$branch"
+    delete_worktree_state "$project" "$branch" 2>/dev/null || true
 
     # Run post_delete hook if defined
     run_hook "$PROJECT_CONFIG_FILE" "post_delete"

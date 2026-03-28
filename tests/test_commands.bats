@@ -297,6 +297,76 @@ hooks:
     [[ "$(get_worktree_state "testproj" "feature/lifecycle" "path")" == "" ]]
 }
 
+@test "create+delete: slot released when worktree directory missing" {
+    _create_test_config "testproj"
+    load_project_config "testproj"
+
+    # Simulate create: worktree + state + slot
+    local wt_path
+    wt_path=$(create_worktree "feature/slot-leak" "" "$TEST_REPO" 2>/dev/null)
+    [[ -d "$wt_path" ]]
+
+    local slot
+    slot=$(claim_slot "testproj" "feature/slot-leak" 3)
+    [[ "$slot" == "0" ]]
+
+    create_worktree_state "testproj" "feature/slot-leak" "$wt_path" "$slot"
+
+    # Externally remove the worktree directory (simulates OS crash, manual rm, etc.)
+    rm -rf "$wt_path"
+    git -C "$TEST_REPO" worktree prune 2>/dev/null
+
+    # cmd_delete should still clean up slot and state even though directory is gone
+    run cmd_delete "feature/slot-leak" -p "testproj" --force 2>&1
+    [[ "$status" -eq 0 ]]
+
+    # Verify slot was released (not leaked)
+    [[ "$(get_slot_for_worktree "testproj" "feature/slot-leak")" == "" ]]
+    [[ "$(get_worktree_state "testproj" "feature/slot-leak" "path")" == "" ]]
+
+    # Verify the freed slot can be reused
+    local new_slot
+    new_slot=$(claim_slot "testproj" "feature/new-branch" 3)
+    [[ "$new_slot" == "0" ]]
+}
+
+@test "create+delete: slot released prevents over-allocation" {
+    _create_test_config "testproj"
+    load_project_config "testproj"
+
+    # Create two worktrees to fill slots 0 and 1
+    local wt1 wt2
+    wt1=$(create_worktree "feature/over-a" "" "$TEST_REPO" 2>/dev/null)
+    wt2=$(create_worktree "feature/over-b" "" "$TEST_REPO" 2>/dev/null)
+
+    local slot1 slot2
+    slot1=$(claim_slot "testproj" "feature/over-a" 3)
+    slot2=$(claim_slot "testproj" "feature/over-b" 3)
+    [[ "$slot1" == "0" ]]
+    [[ "$slot2" == "1" ]]
+
+    create_worktree_state "testproj" "feature/over-a" "$wt1" "$slot1"
+    create_worktree_state "testproj" "feature/over-b" "$wt2" "$slot2"
+
+    # Externally remove first worktree
+    rm -rf "$wt1"
+    git -C "$TEST_REPO" worktree prune 2>/dev/null
+
+    # Delete the missing worktree — slot should be freed
+    run cmd_delete "feature/over-a" -p "testproj" --force 2>&1
+    [[ "$status" -eq 0 ]]
+
+    # Verify only 1 slot in use
+    local count
+    count=$(slots_in_use "testproj")
+    [[ "$count" == "1" ]]
+
+    # Verify the freed slot 0 can be reclaimed
+    local new_slot
+    new_slot=$(claim_slot "testproj" "feature/over-c" 3)
+    [[ "$new_slot" == "0" ]]
+}
+
 # ===== exec with port env vars =====
 
 @test "exec: exports port variables" {
