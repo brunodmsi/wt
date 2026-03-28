@@ -70,74 +70,7 @@ cmd_init() {
     # Create configuration
     log_info "Creating configuration for project: $project_name"
 
-    cat > "$config_file" << EOF
-# Configuration for project: $project_name
-name: $project_name
-repo_path: $repo_root
-
-# Port configuration
-ports:
-  # Reserved ports for services requiring specific ports
-  reserved:
-    range: { min: 3000, max: 3005 }
-    slots: 3
-    services: {}
-      # service-name: 0  # offset from slot base
-
-  # Dynamic ports for flexible services
-  dynamic:
-    range: { min: 4000, max: 5000 }
-    services: {}
-      # service-name: true
-
-# Global environment variables
-env:
-  NODE_ENV: development
-
-# Setup steps (run on worktree create)
-setup: []
-  # - name: install-deps
-  #   description: "Install dependencies"
-  #   command: npm install
-  #   working_dir: "."
-  #   on_failure: abort  # abort | continue | retry
-  #   depends_on: []
-
-# Services (can be started/stopped)
-services: []
-  # - name: app
-  #   description: "Main application"
-  #   working_dir: "."
-  #   command: npm run dev
-  #   port_key: app
-  #   env:
-  #     PORT: "\${PORT}"
-
-# tmux session configuration
-tmux:
-  layout: tiled
-  windows:
-    - name: shell
-      panes:
-        - ""
-
-# Hooks (lifecycle events)
-hooks: {}
-  # pre_create: |
-  #   echo "About to create worktree for \${BRANCH_NAME}"
-  # post_create: |
-  #   echo "Worktree created at \${WORKTREE_PATH}"
-  # pre_start: |
-  #   echo "About to start services for \${BRANCH_NAME}"
-  # post_start: |
-  #   echo "Services started for \${BRANCH_NAME}"
-  # post_stop: |
-  #   echo "Services stopped for \${BRANCH_NAME}"
-  # pre_delete: |
-  #   echo "About to delete \${WORKTREE_PATH}"
-  # post_delete: |
-  #   echo "Worktree deleted for \${BRANCH_NAME}"
-EOF
+    generate_default_config "$project_name" "$repo_root" "$config_file"
 
     # Add .worktrees to .gitignore
     local gitignore="$repo_root/.gitignore"

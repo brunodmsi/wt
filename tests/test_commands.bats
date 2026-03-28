@@ -85,6 +85,41 @@ hooks:
     [[ "$output" == *"Initialize"* ]] || [[ "$output" == *"init"* ]]
 }
 
+@test "init: creates config with setup steps" {
+    cd "$TEST_REPO"
+    cmd_init --name "init-steps-test" 2>/dev/null
+
+    local config_file="$WT_PROJECTS_DIR/init-steps-test.yaml"
+    [[ -f "$config_file" ]]
+
+    local step_count
+    step_count=$(yaml_array_length "$config_file" ".setup")
+    [[ "$step_count" -ge 1 ]]
+}
+
+@test "init: creates config with slots and services" {
+    cd "$TEST_REPO"
+    cmd_init --name "init-slots-test" 2>/dev/null
+
+    local config_file="$WT_PROJECTS_DIR/init-slots-test.yaml"
+    local slots
+    slots=$(yaml_get "$config_file" ".ports.reserved.slots")
+    [[ "$slots" == "3" ]]
+
+    local svc_offset
+    svc_offset=$(yaml_get "$config_file" ".ports.reserved.services.app")
+    [[ "$svc_offset" == "0" ]]
+}
+
+@test "init: created config is loadable" {
+    cd "$TEST_REPO"
+    cmd_init --name "init-load-test" 2>/dev/null
+
+    load_project_config "init-load-test"
+    [[ "$PROJECT_NAME" == "init-load-test" ]]
+    [[ "$PROJECT_RESERVED_SLOTS" == "3" ]]
+}
+
 # ===== config command =====
 
 @test "config: shows help with --help" {

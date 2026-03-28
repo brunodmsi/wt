@@ -458,3 +458,163 @@ FOO=bar
     [[ -d "$WT_STATE_DIR" ]]
     [[ -d "$WT_LOG_DIR" ]]
 }
+
+# --- generate_default_config ---
+
+@test "generate_default_config creates valid YAML file" {
+    local config_file="$WT_PROJECTS_DIR/gentest.yaml"
+    generate_default_config "gentest" "/tmp/fake-repo" "$config_file"
+    [[ -f "$config_file" ]]
+
+    # Verify it's valid YAML that yq can parse
+    local name
+    name=$(yaml_get "$config_file" ".name")
+    [[ "$name" == "gentest" ]]
+}
+
+@test "generate_default_config sets correct repo_path" {
+    local config_file="$WT_PROJECTS_DIR/gentest.yaml"
+    generate_default_config "gentest" "/home/user/my-project" "$config_file"
+
+    local repo_path
+    repo_path=$(yaml_get "$config_file" ".repo_path")
+    [[ "$repo_path" == "/home/user/my-project" ]]
+}
+
+@test "generate_default_config includes setup steps" {
+    local config_file="$WT_PROJECTS_DIR/gentest.yaml"
+    generate_default_config "gentest" "/tmp/fake-repo" "$config_file"
+
+    local step_count
+    step_count=$(get_setup_steps "$config_file")
+    [[ "$step_count" -ge 1 ]]
+
+    local step_name
+    step_name=$(get_setup_step "$config_file" 0 "name")
+    [[ "$step_name" == "install-deps" ]]
+}
+
+@test "generate_default_config includes services" {
+    local config_file="$WT_PROJECTS_DIR/gentest.yaml"
+    generate_default_config "gentest" "/tmp/fake-repo" "$config_file"
+
+    local svc_count
+    svc_count=$(get_services "$config_file")
+    [[ "$svc_count" -ge 1 ]]
+
+    local svc_name
+    svc_name=$(get_service_by_index "$config_file" 0 "name")
+    [[ "$svc_name" == "app" ]]
+}
+
+@test "generate_default_config includes slots configuration" {
+    local config_file="$WT_PROJECTS_DIR/gentest.yaml"
+    generate_default_config "gentest" "/tmp/fake-repo" "$config_file"
+
+    local slots
+    slots=$(yaml_get "$config_file" ".ports.reserved.slots")
+    [[ "$slots" == "3" ]]
+
+    local svc_offset
+    svc_offset=$(yaml_get "$config_file" ".ports.reserved.services.app")
+    [[ "$svc_offset" == "0" ]]
+}
+
+@test "generate_default_config includes tmux layout" {
+    local config_file="$WT_PROJECTS_DIR/gentest.yaml"
+    generate_default_config "gentest" "/tmp/fake-repo" "$config_file"
+
+    local layout
+    layout=$(yaml_get "$config_file" ".tmux.layout")
+    [[ "$layout" == "tiled" ]]
+}
+
+@test "generate_default_config can be loaded by load_project_config" {
+    local config_file="$WT_PROJECTS_DIR/loadtest.yaml"
+    generate_default_config "loadtest" "/tmp/fake-repo" "$config_file"
+
+    load_project_config "loadtest"
+    [[ "$PROJECT_NAME" == "loadtest" ]]
+    [[ "$PROJECT_RESERVED_SLOTS" == "3" ]]
+    [[ "$PROJECT_RESERVED_PORT_MIN" == "3000" ]]
+}
+
+# --- auto_init_project ---
+
+@test "auto_init_project creates config in a git repo" {
+    local repo="$TEST_TMPDIR/auto-init-repo"
+    mkdir -p "$repo"
+    git -C "$repo" init -b main >/dev/null 2>&1
+    git -C "$repo" config user.email "test@test.com"
+    git -C "$repo" config user.name "Test"
+    touch "$repo/README.md"
+    git -C "$repo" add README.md
+    git -C "$repo" commit -m "initial" >/dev/null 2>&1
+
+    cd "$repo"
+    run auto_init_project
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == "auto-init-repo" ]]
+    [[ -f "$WT_PROJECTS_DIR/auto-init-repo.yaml" ]]
+}
+
+@test "auto_init_project adds .worktrees to gitignore" {
+    local repo="$TEST_TMPDIR/auto-gitignore"
+    mkdir -p "$repo"
+    git -C "$repo" init -b main >/dev/null 2>&1
+    git -C "$repo" config user.email "test@test.com"
+    git -C "$repo" config user.name "Test"
+    touch "$repo/README.md"
+    git -C "$repo" add README.md
+    git -C "$repo" commit -m "initial" >/dev/null 2>&1
+
+    cd "$repo"
+    auto_init_project >/dev/null 2>&1
+    grep -q "^\.worktrees/$" "$repo/.gitignore"
+}
+
+@test "auto_init_project returns empty outside git repo" {
+    local tmpdir="$TEST_TMPDIR/not-a-repo"
+    mkdir -p "$tmpdir"
+    cd "$tmpdir"
+    run auto_init_project
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == "" ]]
+}
+
+@test "auto_init_project does not overwrite existing config" {
+    local repo="$TEST_TMPDIR/existing-config"
+    mkdir -p "$repo"
+    git -C "$repo" init -b main >/dev/null 2>&1
+    git -C "$repo" config user.email "test@test.com"
+    git -C "$repo" config user.name "Test"
+    touch "$repo/README.md"
+    git -C "$repo" add README.md
+    git -C "$repo" commit -m "initial" >/dev/null 2>&1
+
+    # Pre-create config
+    create_yaml_fixture "$WT_PROJECTS_DIR/existing-config.yaml" "name: existing-config
+repo_path: $repo"
+
+    cd "$repo"
+    run auto_init_project
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == "" ]]
+}
+
+@test "require_project auto-inits when no config exists" {
+    local repo="$TEST_TMPDIR/require-auto"
+    mkdir -p "$repo"
+    git -C "$repo" init -b main >/dev/null 2>&1
+    git -C "$repo" config user.email "test@test.com"
+    git -C "$repo" config user.name "Test"
+    touch "$repo/README.md"
+    git -C "$repo" add README.md
+    git -C "$repo" commit -m "initial" >/dev/null 2>&1
+
+    cd "$repo"
+    run require_project ""
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == "require-auto" ]]
+    [[ -f "$WT_PROJECTS_DIR/require-auto.yaml" ]]
+}
