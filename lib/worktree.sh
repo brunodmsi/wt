@@ -152,11 +152,16 @@ remove_worktree() {
     fi
 
     log_info "Removing worktree at: $wt_path"
-    git -C "$repo_root" worktree remove $force_flag "$wt_path"
-
-    if [[ $? -ne 0 ]]; then
-        log_error "Failed to remove worktree. Use --force to force removal."
-        return 1
+    if ! git -C "$repo_root" worktree remove $force_flag "$wt_path" 2>/dev/null; then
+        if [[ "$force" == "1" ]]; then
+            # Force: manually remove directory and prune metadata
+            log_warn "Git worktree remove failed, forcing manual removal..."
+            rm -rf "$wt_path"
+            git -C "$repo_root" worktree prune
+        else
+            log_error "Failed to remove worktree. Use --force to force removal."
+            return 1
+        fi
     fi
 
     # Optionally delete the branch

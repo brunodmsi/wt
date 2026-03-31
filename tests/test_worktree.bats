@@ -116,6 +116,22 @@ teardown() {
     git -C "$TEST_REPO" show-ref --verify --quiet "refs/heads/feature/keep-me"
 }
 
+@test "remove_worktree force removes corrupted worktree (directory exists but git metadata missing)" {
+    create_worktree "feature/corrupted" "" "$TEST_REPO" >/dev/null 2>&1
+    local wt_path
+    wt_path=$(worktree_path "feature/corrupted" "$TEST_REPO")
+    # Corrupt the worktree by removing git's internal metadata
+    # This simulates the state where the directory exists but git doesn't recognize it
+    rm -f "$wt_path/.git"
+    # Without force, this should fail
+    run remove_worktree "feature/corrupted" 0 0 "$TEST_REPO"
+    [[ "$status" -ne 0 ]]
+    # With force, it should succeed by falling back to manual removal
+    run remove_worktree "feature/corrupted" 1 1 "$TEST_REPO"
+    [[ "$status" -eq 0 ]]
+    ! worktree_exists "feature/corrupted" "$TEST_REPO"
+}
+
 @test "remove_worktree returns error for non-existing worktree" {
     run remove_worktree "nonexistent" 0 0 "$TEST_REPO"
     [[ "$status" -ne 0 ]]
