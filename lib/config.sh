@@ -59,7 +59,7 @@ yaml_get() {
     fi
 
     local value
-    value=$(yq -e "$path" "$file" 2>/dev/null)
+    value=$(yq "$path" "$file" 2>/dev/null)
 
     if [[ $? -ne 0 ]] || [[ "$value" == "null" ]]; then
         echo "$default"

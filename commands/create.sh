@@ -5,6 +5,7 @@ cmd_create() {
     local branch=""
     local base_branch=""
     local no_setup=0
+    local no_attach=0
     local project=""
 
     # Parse arguments
@@ -17,6 +18,10 @@ cmd_create() {
                 ;;
             --no-setup)
                 no_setup=1
+                shift
+                ;;
+            --no-attach)
+                no_attach=1
                 shift
                 ;;
             -p|--project)
@@ -50,6 +55,13 @@ cmd_create() {
 
     project=$(require_project "$project" "Could not detect project. Use --project or run 'wt init' first.")
     load_project_config "$project"
+
+    # Config-level auto_attach: false overrides default (unless --no-attach already set)
+    if [[ "$no_attach" -eq 0 ]]; then
+        local config_auto_attach
+        config_auto_attach=$(yaml_get "$PROJECT_CONFIG_FILE" ".tmux.auto_attach" "true")
+        [[ "$config_auto_attach" == "false" ]] && no_attach=1
+    fi
 
     # Verify we're in or at the repo
     local repo_root="$PROJECT_REPO_PATH"
@@ -131,7 +143,7 @@ cmd_create() {
     local window_name
     window_name=$(get_session_name "$project" "$branch")
 
-    create_session "$window_name" "$wt_path" "$PROJECT_CONFIG_FILE"
+    create_session "$window_name" "$wt_path" "$PROJECT_CONFIG_FILE" "" "$no_attach"
     set_session_state "$project" "$branch" "$window_name"
 
     # Creation complete, disable cleanup trap
@@ -174,6 +186,7 @@ Arguments:
 Options:
   --from <branch>   Base branch to create from (default: current branch)
   --no-setup        Skip running setup steps
+  --no-attach       Don't switch to the new tmux window after creation
   -p, --project     Project name (auto-detected if not specified)
   -h, --help        Show this help message
 

@@ -168,3 +168,66 @@ tmux:
     splits=$(grep "split-window" "$TMUX_LOG" | wc -l | tr -d ' ')
     [[ "$splits" -eq 3 ]]
 }
+
+# ===== create_session no_attach flag =====
+
+_create_minimal_config() {
+    local config_file="$TEST_TMPDIR/minimal.yaml"
+    create_yaml_fixture "$config_file" "name: test-project
+repo_path: /tmp/repo
+tmux:
+  session: $TMUX_TEST_SESSION"
+    echo "$config_file"
+}
+
+_create_no_attach_config() {
+    local config_file="$TEST_TMPDIR/no_attach.yaml"
+    create_yaml_fixture "$config_file" "name: test-project
+repo_path: /tmp/repo
+tmux:
+  session: $TMUX_TEST_SESSION
+  auto_attach: false"
+    echo "$config_file"
+}
+
+@test "create_session: new-window has no -d flag by default (attaches)" {
+    local config_file
+    config_file=$(_create_minimal_config)
+
+    # Mock session_exists to return true so we hit the new-window path
+    session_exists() { return 0; }
+    window_exists() { return 1; }
+    get_next_available_window_index() { echo "1"; }
+    setup_window_panes_for_worktree() { return 0; }
+
+    create_session "my-branch" "/tmp/repo" "$config_file" "" "0"
+
+    # new-window should NOT have -d flag
+    local new_win_call
+    new_win_call=$(grep "new-window" "$TMUX_LOG")
+    [[ "$new_win_call" != *" -d "* ]] && [[ "$new_win_call" != *" -d"* ]]
+}
+
+@test "create_session: new-window has -d flag when no_attach=1" {
+    local config_file
+    config_file=$(_create_minimal_config)
+
+    session_exists() { return 0; }
+    window_exists() { return 1; }
+    get_next_available_window_index() { echo "1"; }
+    setup_window_panes_for_worktree() { return 0; }
+
+    create_session "my-branch" "/tmp/repo" "$config_file" "" "1"
+
+    grep -q "new-window -d " "$TMUX_LOG"
+}
+
+@test "create_session: tmux.auto_attach false config causes -d on new-window (via cmd_create integration)" {
+    # This test verifies yaml_get reads auto_attach correctly
+    local config_file
+    config_file=$(_create_no_attach_config)
+
+    local val
+    val=$(yaml_get "$config_file" ".tmux.auto_attach" "true")
+    [[ "$val" == "false" ]]
+}

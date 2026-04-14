@@ -63,6 +63,7 @@ create_session() {
     local root_dir="$2"
     local config_file="$3"
     local window_index="${4:-}"  # Optional: specific window index
+    local no_attach="${5:-0}"    # Optional: 1 = don't switch to new window
 
     ensure_tmux
 
@@ -103,14 +104,18 @@ create_session() {
                     log_info "Moved existing window from index $window_index to $next_index"
                 fi
             fi
-            if ! tmux new-window -t "${session}:${window_index}" -n "$window_name" -c "$root_dir"; then
+            local _nw_detach_flag=""
+            [[ "$no_attach" -eq 1 ]] && _nw_detach_flag="-d"
+            if ! tmux new-window ${_nw_detach_flag} -t "${session}:${window_index}" -n "$window_name" -c "$root_dir"; then
                 log_error "Failed to create window at index $window_index"
                 return 1
             fi
         else
             local new_index
             new_index=$(get_next_available_window_index "$session")
-            if ! tmux new-window -t "${session}:${new_index}" -n "$window_name" -c "$root_dir"; then
+            local _nw_detach_flag=""
+            [[ "$no_attach" -eq 1 ]] && _nw_detach_flag="-d"
+            if ! tmux new-window ${_nw_detach_flag} -t "${session}:${new_index}" -n "$window_name" -c "$root_dir"; then
                 log_error "Failed to create window '$window_name'"
                 return 1
             fi
