@@ -598,3 +598,54 @@ hooks:
     [[ -f "$marker" ]]
     [[ "$(cat "$marker")" == "feature/env-check" ]]
 }
+
+# ===== wt rm log cleanup =====
+
+@test "delete: removes service log directory for worktree" {
+    _create_test_config "testproj"
+    load_project_config "testproj"
+
+    local wt_path
+    wt_path=$(create_worktree "feature/log-cleanup" "" "$TEST_REPO" 2>/dev/null)
+    local slot
+    slot=$(claim_slot "testproj" "feature/log-cleanup" 3)
+    create_worktree_state "testproj" "feature/log-cleanup" "$wt_path" "$slot"
+
+    # Simulate log files having been written
+    local sanitized
+    sanitized=$(sanitize_branch_name "feature/log-cleanup")
+    local log_dir="$WT_LOG_DIR/testproj/${sanitized}"
+    mkdir -p "$log_dir"
+    touch "$log_dir/web.log"
+    touch "$log_dir/web.log.prev"
+
+    # Mock tmux so delete doesn't fail on missing session
+    mkdir -p "$TEST_TMPDIR/mockbin"
+    printf '#!/bin/bash\nexit 0\n' > "$TEST_TMPDIR/mockbin/tmux"
+    chmod +x "$TEST_TMPDIR/mockbin/tmux"
+    export PATH="$TEST_TMPDIR/mockbin:$PATH"
+
+    cmd_delete -f -p testproj "feature/log-cleanup" 2>/dev/null || true
+
+    [[ ! -d "$log_dir" ]]
+}
+
+@test "delete: succeeds when no log directory exists" {
+    _create_test_config "testproj"
+    load_project_config "testproj"
+
+    local wt_path
+    wt_path=$(create_worktree "feature/no-logs" "" "$TEST_REPO" 2>/dev/null)
+    local slot
+    slot=$(claim_slot "testproj" "feature/no-logs" 3)
+    create_worktree_state "testproj" "feature/no-logs" "$wt_path" "$slot"
+
+    mkdir -p "$TEST_TMPDIR/mockbin"
+    printf '#!/bin/bash\nexit 0\n' > "$TEST_TMPDIR/mockbin/tmux"
+    chmod +x "$TEST_TMPDIR/mockbin/tmux"
+    export PATH="$TEST_TMPDIR/mockbin:$PATH"
+
+    # No log dir exists — should not fail
+    run cmd_delete -f -p testproj "feature/no-logs" 2>/dev/null
+    [[ "$status" -eq 0 ]]
+}

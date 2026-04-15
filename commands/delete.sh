@@ -79,6 +79,15 @@ cmd_delete() {
     log_info "Stopping services..."
     stop_all_services "$project" "$branch" "$PROJECT_CONFIG_FILE" 2>/dev/null || true
 
+    # Remove service log files for this worktree
+    local sanitized_branch
+    sanitized_branch=$(sanitize_branch_name "$branch")
+    local log_dir="$WT_LOG_DIR/${project}/${sanitized_branch}"
+    if [[ -d "$log_dir" ]]; then
+        rm -rf "$log_dir"
+        log_info "Removed log files"
+    fi
+
     # Kill tmux window
     local window_name
     window_name=$(get_session_name "$project" "$branch")
