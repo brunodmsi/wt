@@ -195,7 +195,7 @@ start_service() {
     # set -m creates a new process group (PGID == PID of subshell).
     # exec replaces the subshell so the service process inherits that PGID.
     # All env vars are already exported above; stdout+stderr go to the log file.
-    (set -m; cd "$exec_dir" && exec $svc_cmd) >> "$log_file" 2>&1 &
+    (set -m; cd "$exec_dir" && exec $svc_cmd) < /dev/null >> "$log_file" 2>&1 &
     local svc_pid=$!
     disown "$svc_pid" 2>/dev/null || true
 
