@@ -1,6 +1,19 @@
 #!/bin/bash
 # lib/service.sh - Service lifecycle management
 
+# Return the log file path for a service
+get_service_log_path() {
+    local project="$1"
+    local branch="$2"
+    local service_name="$3"
+
+    local sanitized
+    sanitized=$(sanitize_branch_name "$branch")
+    local log_dir="$WT_LOG_DIR/${project}/${sanitized}"
+    ensure_dir "$log_dir"
+    echo "${log_dir}/${service_name}.log"
+}
+
 # Find the pane index for a service in the config
 # Pane mapping for services-top layout with 5 panes (tmux renumbers by visual position):
 #   config 0 (service 1) -> tmux pane 0 (top-left)
@@ -150,30 +163,66 @@ start_service() {
     local window_name
     window_name=$(get_session_name "$project" "$branch")
 
-    # Check if port is available before starting
+    # Check if port is available before starting.
+    # If the port is occupied but the service is not tracked as running, there
+    # is an orphaned process (e.g. from a previous interrupted start). Kill it
+    # automatically so the new start can proceed.
     if ! is_port_available "$port"; then
-        log_error "Port $port is already in use (service: $service_name)"
-        log_error "Use 'wt ports set $service_name <port>' to assign a different port"
-        return 1
+        if ! is_service_running "$project" "$branch" "$service_name"; then
+            log_warn "Port $port occupied by untracked process — killing orphan before restart"
+            local orphan_pids
+            orphan_pids=$(lsof -ti "tcp:${port}" 2>/dev/null || true)
+            if [[ -n "$orphan_pids" ]]; then
+                echo "$orphan_pids" | xargs kill -KILL 2>/dev/null || true
+                sleep 1
+            fi
+        fi
+        if ! is_port_available "$port"; then
+            log_error "Port $port is already in use (service: $service_name)"
+            log_error "Use 'wt ports set $service_name <port>' to assign a different port"
+            return 1
+        fi
     fi
 
     log_info "Starting $service_name on port $port..."
 
-    # Find pane for this service within the worktree window
+    # Rotate log: preserve previous run, start fresh
+    local log_file
+    log_file=$(get_service_log_path "$project" "$branch" "$service_name")
+    mv "$log_file" "${log_file}.prev" 2>/dev/null || true
+
+    # Launch service as a background process in its own process group.
+    # set -m creates a new process group (PGID == PID of subshell).
+    # exec replaces the subshell so the service process inherits that PGID.
+    # All env vars are already exported above; stdout+stderr go to the log file.
+    (set -m; cd "$exec_dir" && exec $svc_cmd) < /dev/null >> "$log_file" 2>&1 &
+    local svc_pid=$!
+    disown "$svc_pid" 2>/dev/null || true
+
+    # Update state with real PID
+    update_service_status "$project" "$branch" "$service_name" "running" "$svc_pid" "$port"
+
+    # Wire up tail -f in the designated tmux pane so output is visible
     local pane_idx
     pane_idx=$(find_service_pane_index "$config_file" "$service_name") || true
 
     if [[ -n "$pane_idx" ]]; then
-        # Send command to the service pane with all env vars
-        tmux send-keys -t "${tmux_session}:${window_name}.${pane_idx}" "cd '$exec_dir' && $env_string $svc_cmd" Enter
+        # Only send C-c if we are NOT inside the target pane.
+        # If wt start was called from the service pane itself, C-c would
+        # interrupt wt start rather than the old tail. In that case, skip it —
+        # wt start exits normally and the shell then runs the queued tail -f.
+        local target_pane_id current_pane_id
+        target_pane_id=$(tmux display-message -t "${tmux_session}:${window_name}.${pane_idx}" -p "#{pane_id}" 2>/dev/null || true)
+        current_pane_id="${TMUX_PANE:-}"
+        if [[ -z "$current_pane_id" ]] || [[ "$current_pane_id" != "$target_pane_id" ]]; then
+            tmux send-keys -t "${tmux_session}:${window_name}.${pane_idx}" C-c
+        fi
+        tmux send-keys -t "${tmux_session}:${window_name}.${pane_idx}" "tail -n 200 -f '${log_file}'" Enter
     else
-        # No pane configured, create a new window for the service
-        tmux new-window -t "$tmux_session" -n "${window_name}-${service_name}" -c "$exec_dir"
-        tmux send-keys -t "${tmux_session}:${window_name}-${service_name}" "$env_string $svc_cmd" Enter
+        # No pane configured — create a dedicated window and tail there
+        tmux new-window -d -t "$tmux_session" -n "${window_name}-${service_name}" -c "$exec_dir"
+        tmux send-keys -t "${tmux_session}:${window_name}-${service_name}" "tail -n 200 -f '${log_file}'" Enter
     fi
-
-    # Update state (we don't have PID directly since it's in tmux)
-    update_service_status "$project" "$branch" "$service_name" "running" "" "$port"
 
     # Run health check if configured
     local health_type
@@ -196,23 +245,37 @@ stop_service() {
 
     log_info "Stopping $service_name..."
 
-    # Get tmux session and window names
-    local tmux_session
-    tmux_session=$(get_tmux_session_name "$config_file")
-    local window_name
-    window_name=$(get_session_name "$project" "$branch")
+    # Kill the background process by process group (catches child processes too)
+    local svc_pid
+    svc_pid=$(get_service_state "$project" "$branch" "$service_name" "pid")
 
-    # Find pane for this service within the worktree window
-    local pane_idx
-    pane_idx=$(find_service_pane_index "$config_file" "$service_name") || true
+    if [[ -n "$svc_pid" ]] && [[ "$svc_pid" != "null" ]]; then
+        # SIGTERM to the whole process group (catches child processes),
+        # then fall back to a direct PID kill in case the PGID differs
+        kill -TERM -- "-${svc_pid}" 2>/dev/null || true
+        kill -TERM "$svc_pid" 2>/dev/null || true
 
-    if [[ -n "$pane_idx" ]]; then
-        # Interrupt the service pane
-        interrupt_pane "$tmux_session" "${window_name}.${pane_idx}" 2>/dev/null || true
+        # Wait up to 5s for graceful exit, then force-kill
+        local waited=0
+        while kill -0 "$svc_pid" 2>/dev/null && [[ $waited -lt 5 ]]; do
+            sleep 1
+            waited=$((waited + 1))
+        done
+
+        kill -KILL -- "-${svc_pid}" 2>/dev/null || true
+        kill -KILL "$svc_pid" 2>/dev/null || true
     else
-        # Try service-named window (fallback for services started without pane config)
-        if tmux list-windows -t "$tmux_session" -F "#{window_name}" 2>/dev/null | grep -q "^${window_name}-${service_name}$"; then
-            interrupt_pane "$tmux_session" "${window_name}-${service_name}" 2>/dev/null || true
+        log_warn "No PID recorded for $service_name — attempting port-based cleanup"
+        # Fall back: find and kill any process on the service's port
+        local svc_port
+        svc_port=$(get_service_state "$project" "$branch" "$service_name" "port")
+        if [[ -n "$svc_port" ]] && [[ "$svc_port" != "null" ]]; then
+            local port_pids
+            port_pids=$(lsof -ti "tcp:${svc_port}" 2>/dev/null || true)
+            if [[ -n "$port_pids" ]]; then
+                log_info "Killing process(es) on port $svc_port: $port_pids"
+                echo "$port_pids" | xargs kill -KILL 2>/dev/null || true
+            fi
         fi
     fi
 
