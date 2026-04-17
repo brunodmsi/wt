@@ -279,6 +279,23 @@ stop_service() {
         fi
     fi
 
+    # Wait for the port to be released (up to 5s) so callers like restart
+    # don't race against the process still shutting down
+    local svc_port
+    svc_port=$(get_service_state "$project" "$branch" "$service_name" "port")
+    if [[ -n "$svc_port" ]] && [[ "$svc_port" != "null" ]]; then
+        local waited=0
+        while ! is_port_available "$svc_port" && [[ $waited -lt 5 ]]; do
+            sleep 1
+            waited=$((waited + 1))
+        done
+        # If still occupied after grace period, force-kill via port
+        if ! is_port_available "$svc_port"; then
+            log_warn "$service_name did not release port $svc_port — force killing"
+            lsof -ti "tcp:${svc_port}" 2>/dev/null | xargs kill -KILL 2>/dev/null || true
+        fi
+    fi
+
     # Update state
     update_service_status "$project" "$branch" "$service_name" "stopped"
 

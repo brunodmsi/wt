@@ -25,6 +25,7 @@ setup() {
     source "$WT_SCRIPT_DIR/commands/delete.sh"
     source "$WT_SCRIPT_DIR/commands/start.sh"
     source "$WT_SCRIPT_DIR/commands/stop.sh"
+    source "$WT_SCRIPT_DIR/commands/restart.sh"
 
     # Create a test git repo
     TEST_REPO="$TEST_TMPDIR/test-repo"
@@ -229,6 +230,64 @@ hooks:
     run cmd_stop --help
     [[ "$status" -eq 0 ]]
     [[ "$output" == *"stop"* ]] || [[ "$output" == *"Stop"* ]]
+}
+
+# ===== restart command =====
+
+@test "restart: shows help with --help" {
+    run cmd_restart --help
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *"restart"* ]] || [[ "$output" == *"Restart"* ]]
+}
+
+@test "restart: stops then starts a service" {
+    _create_test_config "testproj"
+    load_project_config "testproj"
+
+    local wt_path
+    wt_path=$(create_worktree "feature/restart-test" "" "$TEST_REPO" 2>/dev/null)
+    local slot
+    slot=$(claim_slot "testproj" "feature/restart-test" 3)
+    create_worktree_state "testproj" "feature/restart-test" "$wt_path" "$slot"
+
+    # Simulate a running service with a real PID
+    sleep 60 &
+    local old_pid=$!
+    update_service_status "testproj" "feature/restart-test" "web" "running" "$old_pid" "3000"
+
+    # Mock tmux
+    mkdir -p "$TEST_TMPDIR/mockbin"
+    printf '#!/bin/bash\nexit 0\n' > "$TEST_TMPDIR/mockbin/tmux"
+    chmod +x "$TEST_TMPDIR/mockbin/tmux"
+    export PATH="$TEST_TMPDIR/mockbin:$PATH"
+
+    cmd_restart -p testproj "feature/restart-test" web 2>/dev/null || true
+
+    # Old process must be dead
+    ! kill -0 "$old_pid" 2>/dev/null
+
+    # State must reflect a new running entry with a fresh PID
+    local new_status
+    new_status=$(get_service_status "testproj" "feature/restart-test" "web")
+    [[ "$new_status" == "running" ]]
+
+    local new_pid
+    new_pid=$(get_service_state "testproj" "feature/restart-test" "web" "pid")
+    [[ "$new_pid" != "$old_pid" ]]
+    kill "$new_pid" 2>/dev/null || true
+}
+
+@test "restart: requires --all or service name" {
+    _create_test_config "testproj"
+    load_project_config "testproj"
+
+    local wt_path
+    wt_path=$(create_worktree "feature/restart-err" "" "$TEST_REPO" 2>/dev/null)
+    claim_slot "testproj" "feature/restart-err" 3
+    create_worktree_state "testproj" "feature/restart-err" "$wt_path" 0
+
+    run cmd_restart -p testproj "feature/restart-err"
+    [[ "$status" -ne 0 ]]
 }
 
 # ===== run command =====

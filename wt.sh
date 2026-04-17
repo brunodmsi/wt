@@ -33,6 +33,7 @@ source "${WT_SCRIPT_DIR}/commands/delete.sh"
 source "${WT_SCRIPT_DIR}/commands/list.sh"
 source "${WT_SCRIPT_DIR}/commands/start.sh"
 source "${WT_SCRIPT_DIR}/commands/stop.sh"
+source "${WT_SCRIPT_DIR}/commands/restart.sh"
 source "${WT_SCRIPT_DIR}/commands/status.sh"
 source "${WT_SCRIPT_DIR}/commands/attach.sh"
 source "${WT_SCRIPT_DIR}/commands/run.sh"
@@ -189,6 +190,9 @@ main() {
             ;;
         stop|down)
             cmd_stop "$@"
+            ;;
+        restart)
+            cmd_restart "$@"
             ;;
         status|st)
             cmd_status "$@"
