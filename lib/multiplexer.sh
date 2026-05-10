@@ -71,7 +71,7 @@ multiplexer_open_tab() {
             return $?
             ;;
         herdr)
-            multiplexer_open_tab_herdr "$window_name" "$root_dir"
+            multiplexer_open_tab_herdr "$window_name" "$root_dir" "$no_attach"
             return $?
             ;;
         none)
@@ -81,12 +81,12 @@ multiplexer_open_tab() {
     esac
 }
 
-# Best-effort herdr integration.
-# herdr does not document a CLI for spawning panes/tabs from outside, so we
-# attempt a few likely subcommands; if none work, we log a clear instruction.
+# herdr integration via `herdr tab create`.
+# Honors WT_HERDR_NO_FOCUS=1 (or no_attach) to skip --focus.
 multiplexer_open_tab_herdr() {
     local window_name="$1"
     local root_dir="$2"
+    local no_attach="${3:-0}"
 
     if ! command_exists herdr; then
         log_warn "herdr environment detected but 'herdr' CLI not found in PATH"
@@ -94,20 +94,21 @@ multiplexer_open_tab_herdr() {
         return 0
     fi
 
-    # Try documented session subcommand for spawning a workspace.
-    # If herdr ever ships a `tab new` / `pane new` command, prefer that.
-    if herdr --help 2>/dev/null | grep -qE '^\s*(tab|pane|window)\s'; then
-        if herdr tab new --cwd "$root_dir" --name "$window_name" 2>/dev/null \
-           || herdr pane new --cwd "$root_dir" --name "$window_name" 2>/dev/null \
-           || herdr window new --cwd "$root_dir" --name "$window_name" 2>/dev/null; then
-            log_success "Opened herdr tab '$window_name'"
-            return 0
-        fi
+    local focus_flag="--focus"
+    if [[ "$no_attach" == "1" ]] || [[ -n "${WT_HERDR_NO_FOCUS:-}" ]]; then
+        focus_flag="--no-focus"
     fi
 
-    log_warn "herdr has no programmatic pane API; cannot auto-open a tab"
+    local out
+    if out=$(herdr tab create --cwd "$root_dir" --label "$window_name" "$focus_flag" 2>&1); then
+        log_success "Opened herdr tab '$window_name'"
+        log_debug "$out"
+        return 0
+    fi
+
+    log_warn "herdr tab create failed: $out"
     log_info "Open a new tab in herdr and run: cd '$root_dir'"
-    return 0
+    return 1
 }
 
 # Get the current multiplexer's session label for display purposes.

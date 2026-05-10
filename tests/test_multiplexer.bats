@@ -85,6 +85,48 @@ teardown() {
     [[ "$output" == *"/tmp/wt"* ]]
 }
 
+@test "multiplexer_open_tab herdr calls 'herdr tab create' when CLI present" {
+    export WT_MULTIPLEXER="herdr"
+    export HERDR_STUB_LOG="$TEST_TMPDIR/herdr.log"
+    : > "$HERDR_STUB_LOG"
+
+    # Place a stub herdr on PATH so the call is captured.
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<EOF
+#!/bin/bash
+echo "HERDR_CALL: \$*" >> "$HERDR_STUB_LOG"
+echo '{"id":"cli:tab:create","result":{"type":"tab_created"}}'
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+    PATH="$TEST_TMPDIR/bin:$PATH" run multiplexer_open_tab "branch-x" "/tmp/wt" "/tmp/cfg.yml" 0
+    [ "$status" -eq 0 ]
+    log=$(cat "$HERDR_STUB_LOG")
+    [[ "$log" == *"tab create"* ]]
+    [[ "$log" == *"--cwd /tmp/wt"* ]]
+    [[ "$log" == *"--label branch-x"* ]]
+    [[ "$log" == *"--focus"* ]]
+}
+
+@test "multiplexer_open_tab herdr passes --no-focus when no_attach=1" {
+    export WT_MULTIPLEXER="herdr"
+    export HERDR_STUB_LOG="$TEST_TMPDIR/herdr.log"
+    : > "$HERDR_STUB_LOG"
+
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<EOF
+#!/bin/bash
+echo "HERDR_CALL: \$*" >> "$HERDR_STUB_LOG"
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+    PATH="$TEST_TMPDIR/bin:$PATH" run multiplexer_open_tab "branch-x" "/tmp/wt" "/tmp/cfg.yml" 1
+    [ "$status" -eq 0 ]
+    log=$(cat "$HERDR_STUB_LOG")
+    [[ "$log" == *"--no-focus"* ]]
+    [[ "$log" != *"--focus "* ]] && [[ "$log" != *--focus$'\n'* ]]
+}
+
 @test "multiplexer_session_label returns 'herdr' for herdr" {
     export WT_MULTIPLEXER="herdr"
     run multiplexer_session_label "/tmp/cfg.yml"

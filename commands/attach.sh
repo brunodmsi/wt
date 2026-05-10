@@ -57,9 +57,21 @@ cmd_attach() {
     case "$_attach_mux" in
         herdr)
             _attach_wt_path=$(get_worktree_path "$project" "$branch")
-            log_warn "herdr has no programmatic attach API"
-            log_info "Open a new tab in herdr and run: cd '$_attach_wt_path'"
-            return 0
+            local _attach_label
+            _attach_label=$(get_session_name "$project" "$branch")
+            # Try to focus an existing tab with this label; create one if missing.
+            if command_exists herdr && command_exists jq; then
+                local _attach_tab_id
+                _attach_tab_id=$(herdr tab list 2>/dev/null \
+                    | jq -r --arg L "$_attach_label" '.result.tabs[]? | select(.label == $L) | .tab_id' 2>/dev/null \
+                    | head -1)
+                if [[ -n "$_attach_tab_id" ]]; then
+                    herdr tab focus "$_attach_tab_id" >/dev/null 2>&1 \
+                        && { log_success "Focused herdr tab '$_attach_label'"; return 0; }
+                fi
+            fi
+            multiplexer_open_tab_herdr "$_attach_label" "$_attach_wt_path" 0
+            return $?
             ;;
         none)
             _attach_wt_path=$(get_worktree_path "$project" "$branch")
