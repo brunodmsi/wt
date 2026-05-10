@@ -289,17 +289,17 @@ $svc_name@$sanitized_branch:$effective_port"
 # Helper functions for doctor output
 _doctor_pass() {
     echo -e "  ${GREEN}PASS${NC}  $1"
-    ((passed++))
+    passed=$((passed + 1))
 }
 
 _doctor_fail() {
     echo -e "  ${RED}FAIL${NC}  $1"
-    ((failed++))
+    failed=$((failed + 1))
 }
 
 _doctor_warn() {
     echo -e "  ${YELLOW}WARN${NC}  $1"
-    ((warnings++))
+    warnings=$((warnings + 1))
 }
 
 _doctor_check_cmd() {
