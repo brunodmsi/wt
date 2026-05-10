@@ -141,6 +141,16 @@ For services requiring specific ports (OAuth callbacks, Privy):
 
 Max 3 concurrent worktrees can use reserved ports. Dynamic services get deterministic hash-based ports.
 
+## Multiplexer Support
+
+`wt create` and `wt attach` detect the active terminal multiplexer:
+
+- **tmux** — full window/pane/layout/service orchestration (default).
+- **dmux** ([dmux.ai](https://dmux.ai)) — driven through tmux underneath.
+- **herdr** ([herdr.dev](https://herdr.dev)) — best-effort; falls back to logging the
+  worktree path since herdr does not expose a programmatic pane API.
+- Set `WT_MULTIPLEXER=tmux|dmux|herdr|none` to override detection. Run `wt doctor` to see what's detected.
+
 ## Tmux Integration
 
 Once services are running in tmux, you can interact with panes directly:

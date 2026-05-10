@@ -51,6 +51,24 @@ cmd_attach() {
     project=$(require_project "$project")
     load_project_config "$project"
 
+    # Bail early when the active multiplexer doesn't support attach.
+    local _attach_mux _attach_wt_path
+    _attach_mux=$(detect_multiplexer)
+    case "$_attach_mux" in
+        herdr)
+            _attach_wt_path=$(get_worktree_path "$project" "$branch")
+            log_warn "herdr has no programmatic attach API"
+            log_info "Open a new tab in herdr and run: cd '$_attach_wt_path'"
+            return 0
+            ;;
+        none)
+            _attach_wt_path=$(get_worktree_path "$project" "$branch")
+            log_warn "No multiplexer available; cd into the worktree manually:"
+            echo "  cd '$_attach_wt_path'"
+            return 0
+            ;;
+    esac
+
     # Get window name (sanitized branch)
     local window_name
     window_name=$(get_session_name "$project" "$branch")

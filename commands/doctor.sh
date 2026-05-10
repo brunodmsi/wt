@@ -48,6 +48,19 @@ cmd_doctor() {
 
     echo ""
 
+    # --- 1b. Multiplexer ---
+    echo -e "${BOLD}Multiplexer${NC}"
+    local _doctor_mux
+    _doctor_mux=$(detect_multiplexer)
+    case "$_doctor_mux" in
+        tmux) _doctor_pass "Active multiplexer: tmux" ;;
+        dmux) _doctor_pass "Active multiplexer: dmux (tmux backend)" ;;
+        herdr) _doctor_warn "Active multiplexer: herdr (no programmatic pane API; wt create will log fallback)" ;;
+        none) _doctor_warn "No multiplexer detected (tmux/dmux/herdr) — wt create will skip session integration" ;;
+    esac
+
+    echo ""
+
     # --- 2. Project config ---
     echo -e "${BOLD}Project Configuration${NC}"
 

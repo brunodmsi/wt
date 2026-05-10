@@ -248,6 +248,24 @@ services:
 
 ---
 
+### Multiplexer Detection
+
+`wt create` and `wt attach` detect the active terminal multiplexer and dispatch
+accordingly. Detection order:
+
+1. `WT_MULTIPLEXER` env var override (`tmux`, `dmux`, `herdr`, or `none`).
+2. **herdr** — when `$HERDR_SOCKET_PATH` is set.
+3. **dmux** — `$DMUX_SESSION` / `$DMUX_PANE_ID`, tmux session name prefixed
+   with `dmux`, or a running `dmux` process.
+4. **tmux** — when `$TMUX` is set or `tmux` is on `PATH`.
+5. **none** — worktree is created but no multiplexer integration runs.
+
+dmux runs on top of tmux, so wt drives it through the same tmux backend.
+herdr does not currently expose a programmatic pane API; when herdr is the
+active multiplexer, wt falls back to logging the worktree path and the
+`cd` command needed to enter it. Set `WT_MULTIPLEXER=tmux` to force the
+tmux backend even when herdr is detected.
+
 ### tmux Configuration
 
 The `tmux` section defines how tmux windows and panes are created for each worktree.
