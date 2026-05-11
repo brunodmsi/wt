@@ -175,6 +175,92 @@ services:
     [[ "$output" != *"herdr backend"* ]]
 }
 
+@test "herdr_get_commands returns post_create list" {
+    local cfg="$TEST_TMPDIR/cfg.yml"
+    create_yaml_fixture "$cfg" "herdr:
+  post_create:
+    - 'pnpm dev'
+    - 'echo ready'"
+    run herdr_get_commands "$cfg" "post_create"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"pnpm dev"* ]]
+    [[ "$output" == *"echo ready"* ]]
+}
+
+@test "herdr_get_commands returns empty when section is absent" {
+    local cfg="$TEST_TMPDIR/cfg.yml"
+    create_yaml_fixture "$cfg" "name: x"
+    run herdr_get_commands "$cfg" "post_create"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "multiplexer_open_tab herdr runs post_create commands in new pane" {
+    export WT_MULTIPLEXER="herdr"
+    export HERDR_STUB_LOG="$TEST_TMPDIR/herdr.log"
+    : > "$HERDR_STUB_LOG"
+
+    mkdir -p "$TEST_TMPDIR/bin"
+    # Stub herdr that emits the right shape for `tab create` and `pane list`,
+    # records every invocation, and acks `pane run`.
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/bin/bash
+echo "HERDR_CALL: $*" >> "$HERDR_STUB_LOG"
+case "$1 $2" in
+    "tab create")
+        echo '{"id":"req","result":{"type":"tab_info","tab":{"tab_id":"w1:2","workspace_id":"w1","number":2,"label":"branch-x","focused":true,"pane_count":1,"agent_status":"unknown"}}}'
+        ;;
+    "pane list")
+        echo '{"id":"req","result":{"type":"pane_list","panes":[{"pane_id":"w1-3","workspace_id":"w1","tab_id":"w1:2","focused":true}]}}'
+        ;;
+    "pane run")
+        echo '{"id":"req","result":{"type":"ok"}}'
+        ;;
+esac
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+
+    local cfg="$TEST_TMPDIR/cfg.yml"
+    create_yaml_fixture "$cfg" "herdr:
+  post_create:
+    - 'pnpm dev'
+    - 'tail -f log.txt'"
+
+    PATH="$TEST_TMPDIR/bin:$PATH" run multiplexer_open_tab "branch-x" "/tmp/wt" "$cfg" 0
+    [ "$status" -eq 0 ]
+    log=$(cat "$HERDR_STUB_LOG")
+    [[ "$log" == *"tab create --cwd /tmp/wt --label branch-x --focus"* ]]
+    [[ "$log" == *"pane list"* ]]
+    [[ "$log" == *"pane run w1-3 pnpm dev"* ]]
+    [[ "$log" == *"pane run w1-3 tail -f log.txt"* ]]
+}
+
+@test "multiplexer_open_tab herdr without post_create skips pane lookup" {
+    export WT_MULTIPLEXER="herdr"
+    export HERDR_STUB_LOG="$TEST_TMPDIR/herdr.log"
+    : > "$HERDR_STUB_LOG"
+
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/bin/bash
+echo "HERDR_CALL: $*" >> "$HERDR_STUB_LOG"
+echo '{"id":"req","result":{"type":"tab_info","tab":{"tab_id":"w1:2"}}}'
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+
+    local cfg="$TEST_TMPDIR/cfg.yml"
+    create_yaml_fixture "$cfg" "name: x"
+
+    PATH="$TEST_TMPDIR/bin:$PATH" run multiplexer_open_tab "branch-x" "/tmp/wt" "$cfg" 0
+    [ "$status" -eq 0 ]
+    log=$(cat "$HERDR_STUB_LOG")
+    [[ "$log" == *"tab create"* ]]
+    [[ "$log" != *"pane list"* ]]
+    [[ "$log" != *"pane run"* ]]
+}
+
 @test "multiplexer_session_label returns 'herdr' for herdr" {
     export WT_MULTIPLEXER="herdr"
     run multiplexer_session_label "/tmp/cfg.yml"

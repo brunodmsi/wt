@@ -74,7 +74,7 @@ multiplexer_open_tab() {
             return $?
             ;;
         herdr)
-            multiplexer_open_tab_herdr "$window_name" "$root_dir" "$no_attach"
+            multiplexer_open_tab_herdr "$window_name" "$root_dir" "$no_attach" "$config_file"
             return $?
             ;;
         none)
@@ -84,12 +84,59 @@ multiplexer_open_tab() {
     esac
 }
 
+# Read a list of commands from the herdr.<key> section of the project config.
+# Args: config_file key (e.g. "post_create", "post_attach")
+# Output: one command per line (empty output if section is missing or empty).
+herdr_get_commands() {
+    local config_file="$1"
+    local key="$2"
+    [[ -f "$config_file" ]] || return 0
+    yq -r ".herdr.${key} // [] | .[]" "$config_file" 2>/dev/null
+}
+
+# Find the pane_id of the first pane in a herdr tab.
+# Requires jq. Returns empty on failure.
+# Args: tab_id
+herdr_get_pane_for_tab() {
+    local tab_id="$1"
+    [[ -z "$tab_id" ]] && return 1
+    command_exists herdr || return 1
+    command_exists jq    || return 1
+    herdr pane list 2>/dev/null \
+        | jq -r --arg T "$tab_id" '.result.panes[]? | select(.tab_id == $T) | .pane_id' 2>/dev/null \
+        | head -1
+}
+
+# Run each newline-separated command in a herdr pane via `herdr pane run`.
+# Args: pane_id commands_multiline
+# Returns 0 even when individual commands fail (warns instead) so a single
+# bad post_* entry doesn't abort the calling flow.
+herdr_run_commands_in_pane() {
+    local pane_id="$1"
+    local commands="$2"
+    [[ -z "$pane_id" ]] && return 0
+    [[ -z "$commands" ]] && return 0
+    command_exists herdr || { log_warn "herdr CLI missing; cannot run pane commands"; return 0; }
+
+    while IFS= read -r cmd; do
+        [[ -z "$cmd" ]] && continue
+        log_debug "herdr pane run $pane_id: $cmd"
+        if ! herdr pane run "$pane_id" "$cmd" >/dev/null 2>&1; then
+            log_warn "herdr pane command failed: $cmd"
+        fi
+    done <<< "$commands"
+    return 0
+}
+
 # herdr integration via `herdr tab create`.
 # Honors WT_HERDR_NO_FOCUS=1 (or no_attach) to skip --focus.
+# When a config_file is provided and defines `herdr.post_create`, each command
+# is queued into the new tab's pane via `herdr pane run`.
 multiplexer_open_tab_herdr() {
     local window_name="$1"
     local root_dir="$2"
     local no_attach="${3:-0}"
+    local config_file="${4:-}"
 
     if ! command_exists herdr; then
         log_warn "herdr environment detected but 'herdr' CLI not found in PATH"
@@ -103,15 +150,41 @@ multiplexer_open_tab_herdr() {
     fi
 
     local out
-    if out=$(herdr tab create --cwd "$root_dir" --label "$window_name" "$focus_flag" 2>&1); then
-        log_success "Opened herdr tab '$window_name'"
-        log_debug "$out"
-        return 0
+    if ! out=$(herdr tab create --cwd "$root_dir" --label "$window_name" "$focus_flag" 2>&1); then
+        log_warn "herdr tab create failed: $out"
+        log_info "Open a new tab in herdr and run: cd '$root_dir'"
+        return 1
     fi
 
-    log_warn "herdr tab create failed: $out"
-    log_info "Open a new tab in herdr and run: cd '$root_dir'"
-    return 1
+    log_success "Opened herdr tab '$window_name'"
+    log_debug "$out"
+
+    # Run herdr.post_create commands in the new tab's pane, if any.
+    if [[ -n "$config_file" ]]; then
+        local post_cmds
+        post_cmds=$(herdr_get_commands "$config_file" "post_create")
+        if [[ -n "$post_cmds" ]]; then
+            if ! command_exists jq; then
+                log_warn "jq is required to run herdr.post_create commands (skipping)"
+            else
+                local tab_id pane_id
+                tab_id=$(echo "$out" | jq -r '.result.tab.tab_id // empty' 2>/dev/null)
+                if [[ -n "$tab_id" ]]; then
+                    pane_id=$(herdr_get_pane_for_tab "$tab_id")
+                    if [[ -n "$pane_id" ]]; then
+                        log_info "Running herdr.post_create commands in pane $pane_id"
+                        herdr_run_commands_in_pane "$pane_id" "$post_cmds"
+                    else
+                        log_warn "Could not resolve pane for new herdr tab $tab_id; skipping post_create"
+                    fi
+                else
+                    log_warn "Could not parse tab_id from herdr response; skipping post_create"
+                fi
+            fi
+        fi
+    fi
+
+    return 0
 }
 
 # Warn when the active multiplexer cannot reproduce the project's pane layout
