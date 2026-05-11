@@ -11,6 +11,7 @@ setup() {
     load_lib "state"
     load_lib "worktree"
     load_lib "setup"
+    load_lib "multiplexer"
     load_lib "tmux"
     load_lib "service"
     source "$WT_SCRIPT_DIR/commands/doctor.sh"
@@ -128,4 +129,21 @@ services: []"
     run cmd_doctor -p nonexistent 2>&1
     [[ "$output" == *"Summary"* ]]
     [[ "$output" == *"passed"* ]]
+}
+
+# --- Multiplexer ---
+
+@test "doctor reports active multiplexer section" {
+    run cmd_doctor -p nonexistent 2>&1
+    [[ "$output" == *"Multiplexer"* ]]
+}
+
+@test "doctor labels herdr explicitly when WT_MULTIPLEXER=herdr" {
+    WT_MULTIPLEXER=herdr run cmd_doctor -p nonexistent 2>&1
+    [[ "$output" == *"herdr"* ]]
+}
+
+@test "doctor labels none explicitly when WT_MULTIPLEXER=none" {
+    WT_MULTIPLEXER=none run cmd_doctor -p nonexistent 2>&1
+    [[ "$output" == *"No multiplexer"* ]]
 }

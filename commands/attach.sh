@@ -51,6 +51,51 @@ cmd_attach() {
     project=$(require_project "$project")
     load_project_config "$project"
 
+    # Bail early when the active multiplexer doesn't support attach.
+    local _attach_mux _attach_wt_path
+    _attach_mux=$(detect_multiplexer)
+    case "$_attach_mux" in
+        herdr)
+            _attach_wt_path=$(get_worktree_path "$project" "$branch")
+            local _attach_label
+            _attach_label=$(get_session_name "$project" "$branch")
+
+            if ! command_exists herdr; then
+                die "herdr CLI not found in PATH. Install herdr or set WT_MULTIPLEXER=tmux."
+            fi
+            if ! command_exists jq; then
+                die "jq is required to look up herdr tabs by label (prevents duplicate tabs). Install with 'brew install jq' or set WT_MULTIPLEXER=tmux."
+            fi
+
+            # Scope tab lookup to the active workspace so identically-named
+            # tabs in other workspaces don't collide.
+            local _herdr_tab_list_args=()
+            if [[ -n "${HERDR_ACTIVE_WORKSPACE_ID:-}" ]]; then
+                _herdr_tab_list_args+=(--workspace "$HERDR_ACTIVE_WORKSPACE_ID")
+            fi
+
+            local _attach_tab_id
+            _attach_tab_id=$(herdr tab list "${_herdr_tab_list_args[@]}" 2>/dev/null \
+                | jq -r --arg L "$_attach_label" '.result.tabs[]? | select(.label == $L) | .tab_id' 2>/dev/null \
+                | head -1)
+            if [[ -n "$_attach_tab_id" ]]; then
+                if herdr tab focus "$_attach_tab_id" >/dev/null 2>&1; then
+                    log_success "Focused herdr tab '$_attach_label'"
+                    return 0
+                fi
+                log_warn "Found tab '$_attach_label' but failed to focus it; opening a new one"
+            fi
+            multiplexer_open_tab_herdr "$_attach_label" "$_attach_wt_path" 0
+            return $?
+            ;;
+        none)
+            _attach_wt_path=$(get_worktree_path "$project" "$branch")
+            log_warn "No multiplexer available; cd into the worktree manually:"
+            echo "  cd '$_attach_wt_path'"
+            return 0
+            ;;
+    esac
+
     # Get window name (sanitized branch)
     local window_name
     window_name=$(get_session_name "$project" "$branch")

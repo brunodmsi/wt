@@ -248,6 +248,35 @@ services:
 
 ---
 
+### Multiplexer Detection
+
+`wt create` and `wt attach` detect the active terminal multiplexer and dispatch
+accordingly. Detection order:
+
+1. `WT_MULTIPLEXER` env var override (`tmux`, `dmux`, `herdr`, or `none`).
+2. **herdr** — when `$HERDR_SOCKET_PATH` is set.
+3. **dmux** — `$DMUX_SESSION` / `$DMUX_PANE_ID`, tmux session name prefixed
+   with `dmux`, or a running `dmux` process.
+4. **tmux** — when `$TMUX` is set or `tmux` is on `PATH`.
+5. **none** — worktree is created but no multiplexer integration runs.
+
+dmux runs on top of tmux, so wt drives it through the same tmux backend.
+
+For **herdr**, `wt create` calls `herdr tab create --cwd <path> --label <branch>` in
+the active workspace, and `wt attach` looks up the tab by label with `herdr tab list`
+and focuses it via `herdr tab focus`. The lookup is filtered to the active workspace
+(`HERDR_ACTIVE_WORKSPACE_ID`) when set, so tabs with the same branch label in
+different projects do not collide. `jq` is required for the attach lookup.
+
+Multi-pane layouts (`tmux.layout` with more than one pane) and the service
+lifecycle commands (`wt start`, `wt stop`, `wt restart`, `wt status`) are not
+yet wired through the herdr backend — they still drive tmux directly. When
+herdr is active and the project config defines multiple panes, `wt create`
+warns that the layout will not be reproduced inside the herdr tab.
+
+Set `WT_MULTIPLEXER=tmux` to force the tmux backend even when herdr is
+detected.
+
 ### tmux Configuration
 
 The `tmux` section defines how tmux windows and panes are created for each worktree.

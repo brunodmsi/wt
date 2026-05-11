@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 
 # Determine script directory (resolve symlinks)
 SOURCE="${BASH_SOURCE[0]}"
@@ -24,6 +24,7 @@ source "${WT_SCRIPT_DIR}/lib/port.sh"
 source "${WT_SCRIPT_DIR}/lib/state.sh"
 source "${WT_SCRIPT_DIR}/lib/worktree.sh"
 source "${WT_SCRIPT_DIR}/lib/setup.sh"
+source "${WT_SCRIPT_DIR}/lib/multiplexer.sh"
 source "${WT_SCRIPT_DIR}/lib/tmux.sh"
 source "${WT_SCRIPT_DIR}/lib/service.sh"
 

@@ -143,7 +143,11 @@ cmd_create() {
     local window_name
     window_name=$(get_session_name "$project" "$branch")
 
-    create_session "$window_name" "$wt_path" "$PROJECT_CONFIG_FILE" "" "$no_attach"
+    local active_mux
+    active_mux=$(detect_multiplexer)
+    log_info "Multiplexer: $active_mux"
+    multiplexer_warn_dropped_features "$PROJECT_CONFIG_FILE"
+    multiplexer_open_tab "$window_name" "$wt_path" "$PROJECT_CONFIG_FILE" "$no_attach"
     set_session_state "$project" "$branch" "$window_name"
 
     # Creation complete, disable cleanup trap
@@ -162,12 +166,15 @@ cmd_create() {
         log_success "Worktree ready!"
     fi
     echo ""
-    local tmux_session
-    tmux_session=$(get_tmux_session_name "$PROJECT_CONFIG_FILE")
+    local mux_label
+    mux_label=$(multiplexer_session_label "$PROJECT_CONFIG_FILE")
     print_kv "Branch" "$branch"
     print_kv "Path" "$wt_path"
     print_kv "Slot" "$slot"
-    print_kv "tmux" "$tmux_session:$window_name"
+    print_kv "Multiplexer" "$active_mux"
+    if [[ "$active_mux" == "tmux" ]] || [[ "$active_mux" == "dmux" ]]; then
+        print_kv "Session" "$mux_label:$window_name"
+    fi
     echo ""
     echo "Next steps:"
     echo "  wt start $branch --all    # Start all services"
