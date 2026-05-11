@@ -3,8 +3,11 @@
 #
 # Supports tmux, dmux (https://dmux.ai), and herdr (https://herdr.dev).
 # dmux runs on top of tmux, so dmux sessions are driven through tmux commands.
-# herdr does not expose a programmatic API for spawning panes/tabs, so we
-# fall back to a best-effort `herdr` CLI invocation and log instructions.
+# herdr is driven via its CLI: `herdr tab create` opens a tab at the worktree
+# path; `herdr tab focus` (used in `wt attach`) selects an existing tab. Only
+# tab open/focus is wired through herdr today — multi-pane layouts and the
+# service lifecycle (`wt start`/`stop`/`restart`/`status`/`delete`) still drive
+# tmux directly, so they are no-ops or broken under herdr. See issue #10.
 
 # Detect which multiplexer is currently active.
 # Order: WT_MULTIPLEXER override -> herdr -> dmux -> tmux -> none
@@ -109,6 +112,31 @@ multiplexer_open_tab_herdr() {
     log_warn "herdr tab create failed: $out"
     log_info "Open a new tab in herdr and run: cd '$root_dir'"
     return 1
+}
+
+# Warn when the active multiplexer cannot reproduce the project's pane layout
+# or run services through it. herdr today only opens a single tab — multi-pane
+# layouts and `wt start` are still tmux-only, so we surface that at create time.
+# Args: config_file
+multiplexer_warn_dropped_features() {
+    local config_file="$1"
+    local mux
+    mux=$(detect_multiplexer)
+    [[ "$mux" != "herdr" ]] && return 0
+    [[ ! -f "$config_file" ]] && return 0
+
+    local pane_count service_count
+    pane_count=$(yq '[.tmux.windows[]?.panes[]?] | length' "$config_file" 2>/dev/null || echo 0)
+    service_count=$(yq '.services // [] | length' "$config_file" 2>/dev/null || echo 0)
+    [[ "$pane_count" == "null" ]] && pane_count=0
+    [[ "$service_count" == "null" ]] && service_count=0
+
+    if [[ "$pane_count" -gt 1 ]] || [[ "$service_count" -gt 0 ]]; then
+        log_warn "herdr backend opens a single tab — project's multi-pane layout and services will not run inside it."
+        log_warn "  Panes in config: $pane_count   Services: $service_count"
+        log_warn "  'wt start' still drives tmux directly and will not target the herdr tab. Use WT_MULTIPLEXER=tmux to keep the full layout."
+    fi
+    return 0
 }
 
 # Get the current multiplexer's session label for display purposes.

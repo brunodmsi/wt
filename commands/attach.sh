@@ -59,16 +59,31 @@ cmd_attach() {
             _attach_wt_path=$(get_worktree_path "$project" "$branch")
             local _attach_label
             _attach_label=$(get_session_name "$project" "$branch")
-            # Try to focus an existing tab with this label; create one if missing.
-            if command_exists herdr && command_exists jq; then
-                local _attach_tab_id
-                _attach_tab_id=$(herdr tab list 2>/dev/null \
-                    | jq -r --arg L "$_attach_label" '.result.tabs[]? | select(.label == $L) | .tab_id' 2>/dev/null \
-                    | head -1)
-                if [[ -n "$_attach_tab_id" ]]; then
-                    herdr tab focus "$_attach_tab_id" >/dev/null 2>&1 \
-                        && { log_success "Focused herdr tab '$_attach_label'"; return 0; }
+
+            if ! command_exists herdr; then
+                die "herdr CLI not found in PATH. Install herdr or set WT_MULTIPLEXER=tmux."
+            fi
+            if ! command_exists jq; then
+                die "jq is required to look up herdr tabs by label (prevents duplicate tabs). Install with 'brew install jq' or set WT_MULTIPLEXER=tmux."
+            fi
+
+            # Scope tab lookup to the active workspace so identically-named
+            # tabs in other workspaces don't collide.
+            local _herdr_tab_list_args=()
+            if [[ -n "${HERDR_ACTIVE_WORKSPACE_ID:-}" ]]; then
+                _herdr_tab_list_args+=(--workspace "$HERDR_ACTIVE_WORKSPACE_ID")
+            fi
+
+            local _attach_tab_id
+            _attach_tab_id=$(herdr tab list "${_herdr_tab_list_args[@]}" 2>/dev/null \
+                | jq -r --arg L "$_attach_label" '.result.tabs[]? | select(.label == $L) | .tab_id' 2>/dev/null \
+                | head -1)
+            if [[ -n "$_attach_tab_id" ]]; then
+                if herdr tab focus "$_attach_tab_id" >/dev/null 2>&1; then
+                    log_success "Focused herdr tab '$_attach_label'"
+                    return 0
                 fi
+                log_warn "Found tab '$_attach_label' but failed to focus it; opening a new one"
             fi
             multiplexer_open_tab_herdr "$_attach_label" "$_attach_wt_path" 0
             return $?

@@ -55,7 +55,7 @@ cmd_doctor() {
     case "$_doctor_mux" in
         tmux) _doctor_pass "Active multiplexer: tmux" ;;
         dmux) _doctor_pass "Active multiplexer: dmux (tmux backend)" ;;
-        herdr) _doctor_warn "Active multiplexer: herdr (no programmatic pane API; wt create will log fallback)" ;;
+        herdr) _doctor_warn "Active multiplexer: herdr (opens a tab via 'herdr tab create'; multi-pane layouts and wt start/stop are not wired through herdr yet)" ;;
         none) _doctor_warn "No multiplexer detected (tmux/dmux/herdr) — wt create will skip session integration" ;;
     esac
 

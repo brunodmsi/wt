@@ -127,6 +127,54 @@ EOF
     [[ "$log" != *"--focus "* ]] && [[ "$log" != *--focus$'\n'* ]]
 }
 
+@test "multiplexer_warn_dropped_features is silent for tmux" {
+    export WT_MULTIPLEXER="tmux"
+    local cfg="$TEST_TMPDIR/cfg.yml"
+    create_yaml_fixture "$cfg" "tmux:
+  windows:
+    - name: dev
+      panes:
+        - command: 'a'
+        - command: 'b'
+services:
+  - name: svc-a"
+    run multiplexer_warn_dropped_features "$cfg"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"herdr backend"* ]]
+}
+
+@test "multiplexer_warn_dropped_features warns under herdr with multi-pane config" {
+    export WT_MULTIPLEXER="herdr"
+    local cfg="$TEST_TMPDIR/cfg.yml"
+    create_yaml_fixture "$cfg" "tmux:
+  windows:
+    - name: dev
+      panes:
+        - command: 'a'
+        - command: 'b'
+        - command: 'c'
+services:
+  - name: svc-a"
+    run multiplexer_warn_dropped_features "$cfg"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"herdr backend"* ]]
+    [[ "$output" == *"Panes in config: 3"* ]]
+    [[ "$output" == *"Services: 1"* ]]
+}
+
+@test "multiplexer_warn_dropped_features silent under herdr with single-pane no-services config" {
+    export WT_MULTIPLEXER="herdr"
+    local cfg="$TEST_TMPDIR/cfg.yml"
+    create_yaml_fixture "$cfg" "tmux:
+  windows:
+    - name: dev
+      panes:
+        - command: 'a'"
+    run multiplexer_warn_dropped_features "$cfg"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"herdr backend"* ]]
+}
+
 @test "multiplexer_session_label returns 'herdr' for herdr" {
     export WT_MULTIPLEXER="herdr"
     run multiplexer_session_label "/tmp/cfg.yml"
