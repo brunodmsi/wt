@@ -293,7 +293,7 @@ list_slots() {
         return
     fi
 
-    yq -r ".slots.\"$project\" // {} | to_entries | .[] | \"\(.key):\(.value)\"" "$file" 2>/dev/null
+    yq -r ".slots.\"$project\" // {} | to_entries | map(\"\(.key):\(.value)\") | .[]" "$file" 2>/dev/null
 }
 
 # Get slot count in use for a project
