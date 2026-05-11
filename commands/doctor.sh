@@ -55,7 +55,13 @@ cmd_doctor() {
     case "$_doctor_mux" in
         tmux) _doctor_pass "Active multiplexer: tmux" ;;
         dmux) _doctor_pass "Active multiplexer: dmux (tmux backend)" ;;
-        herdr) _doctor_warn "Active multiplexer: herdr (opens a tab via 'herdr tab create'; multi-pane layouts and wt start/stop are not wired through herdr yet)" ;;
+        herdr)
+            if command_exists jq; then
+                _doctor_pass "Active multiplexer: herdr (jq present; layout mount + service tail wired)"
+            else
+                _doctor_warn "Active multiplexer: herdr — jq is missing; install with 'brew install jq' so layout mount and tab lookup work"
+            fi
+            ;;
         none) _doctor_warn "No multiplexer detected (tmux/dmux/herdr) — wt create will skip session integration" ;;
     esac
 

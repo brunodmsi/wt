@@ -147,13 +147,26 @@ Max 3 concurrent worktrees can use reserved ports. Dynamic services get determin
 
 - **tmux** — full window/pane/layout/service orchestration (default).
 - **dmux** ([dmux.ai](https://dmux.ai)) — driven through tmux underneath.
-- **herdr** ([herdr.dev](https://herdr.dev)) — opens a single tab at the worktree path via
-  `herdr tab create`. `wt attach` focuses an existing tab via `herdr tab focus`. Multi-pane
-  layouts and `wt start`/`stop`/`restart`/`status` are not yet wired through herdr; services
-  will not be launched in the new tab.
+- **herdr** ([herdr.dev](https://herdr.dev)) — first-class: opens a tab at the worktree
+  path via `herdr tab create`, mounts the configured `tmux.layout` inside it using
+  `pane.split`, and queues `cd <dir>` + per-pane commands in each resulting pane.
+  `wt attach` focuses the matching tab via `herdr tab focus` or creates one if missing.
+  `wt delete` closes the tab via `herdr tab close`. `wt start` tails service logs into
+  the corresponding herdr pane (pane_id is persisted per service at create time).
+  Pane sizes follow herdr's 50/50 default since herdr's `pane.split` does not yet
+  support percentage sizing.
+- **`herdr.post_create` / `herdr.post_attach`** YAML blocks queue commands into the
+  worktree's tab after it mounts (e.g. start a dev server, run `git status`).
+  `post_create` runs on `wt create`; `post_attach` runs on `wt attach` when a new tab
+  is created — focusing an existing tab is left untouched on purpose. Both land in
+  the orchestrator-style last pane when a layout is mounted, otherwise in the single
+  initial pane.
+- **`wt attach --here`** skips tab creation/focus and operates on the caller's
+  current pane: under herdr it `pane.run`s `cd <path>` + `post_attach`; under tmux it
+  `send-keys` the `cd` to `$TMUX_PANE`.
 - **none** — worktree is created, but no multiplexer integration runs.
 - Set `WT_MULTIPLEXER=tmux|dmux|herdr|none` to override detection. Run `wt doctor` to see what's detected.
-- `jq` is required for `wt attach` under herdr (to look up the existing tab).
+- `jq` is required when running under herdr (response parsing for tab/pane lookups).
 
 ## Tmux Integration
 

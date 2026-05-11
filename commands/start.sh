@@ -106,14 +106,20 @@ cmd_start() {
     export_port_vars "$branch" "$PROJECT_CONFIG_FILE" "$slot"
     export_env_vars "$PROJECT_CONFIG_FILE"
 
-    # Ensure tmux session exists
+    # Ensure the multiplexer has a window/tab for this worktree. Only tmux/dmux
+    # needs an explicit create_session here — under herdr the tab is created by
+    # `wt create` (or `wt attach` falling through), and creating one from
+    # `wt start` would mount a new layout on top of any existing one.
     local session
     session=$(get_session_name "$project" "$branch")
-
-    if ! session_exists "$session"; then
-        local wt_path
-        wt_path=$(get_worktree_path "$project" "$branch")
-        create_session "$session" "$wt_path" "$PROJECT_CONFIG_FILE"
+    local _start_mux
+    _start_mux=$(detect_multiplexer)
+    if [[ "$_start_mux" == "tmux" ]] || [[ "$_start_mux" == "dmux" ]]; then
+        if ! session_exists "$session"; then
+            local wt_path
+            wt_path=$(get_worktree_path "$project" "$branch")
+            create_session "$session" "$wt_path" "$PROJECT_CONFIG_FILE"
+        fi
     fi
 
     # Clean up stale service states
@@ -153,10 +159,15 @@ cmd_start() {
     export WORKTREE_PATH="$(get_worktree_path "$project" "$branch")"
     run_hook "$PROJECT_CONFIG_FILE" "post_start"
 
-    # Optionally attach
+    # Optionally attach — tmux-only flow. Under herdr the user is already in
+    # a pane, so attaching is a no-op (we just print a hint).
     if [[ "$attach" -eq 1 ]]; then
         echo ""
-        attach_session "$session"
+        if [[ "$_start_mux" == "tmux" ]] || [[ "$_start_mux" == "dmux" ]]; then
+            attach_session "$session"
+        else
+            log_info "Under $_start_mux there is nothing to attach to; switch to the herdr tab manually or use 'wt attach $branch --here'."
+        fi
     fi
 }
 

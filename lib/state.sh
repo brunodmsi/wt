@@ -256,6 +256,25 @@ list_worktree_states() {
     yq -r '.worktrees | keys | .[]' "$file" 2>/dev/null
 }
 
+# Return 0 if there's any state row under the worktree key, regardless of
+# which fields are populated. Used by `wt delete` to detect partially-
+# initialised orphans (e.g. interrupted `wt create` left a `session:` row).
+worktree_state_exists() {
+    local project="$1"
+    local branch="$2"
+
+    local file
+    file=$(state_file "$project")
+    [[ ! -f "$file" ]] && return 1
+
+    local sanitized
+    sanitized=$(sanitize_branch_name "$branch")
+
+    local has
+    has=$(yq -r ".worktrees | has(\"$sanitized\")" "$file" 2>/dev/null)
+    [[ "$has" == "true" ]]
+}
+
 # Get all service states for a worktree
 list_service_states() {
     local project="$1"

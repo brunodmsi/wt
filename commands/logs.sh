@@ -77,6 +77,15 @@ cmd_logs() {
     project=$(require_project "$project")
     load_project_config "$project"
 
+    # Under herdr/none we can't capture tmux panes — read the on-disk log
+    # files written by start_service instead.
+    local _logs_mux
+    _logs_mux=$(detect_multiplexer)
+    if [[ "$_logs_mux" != "tmux" ]] && [[ "$_logs_mux" != "dmux" ]]; then
+        _logs_from_files "$project" "$branch" "$target" "$lines" "$show_all" "$_logs_mux"
+        return $?
+    fi
+
     # Get tmux session and window
     local tmux_session
     tmux_session=$(get_tmux_session_name "$PROJECT_CONFIG_FILE")
@@ -129,21 +138,68 @@ cmd_logs() {
     fi
 }
 
+# Read service logs from on-disk files (used when tmux isn't the active mux).
+# Args: project branch target lines show_all mux_name
+_logs_from_files() {
+    local project="$1"
+    local branch="$2"
+    local target="$3"
+    local lines="$4"
+    local show_all="$5"
+    local mux_name="${6:-none}"
+
+    if [[ "$show_all" -eq 1 ]] || [[ -z "$target" ]]; then
+        # Iterate every configured service and show its log file.
+        local svc_names
+        svc_names=$(yq -r '.services[]?.name // ""' "$PROJECT_CONFIG_FILE" 2>/dev/null)
+        if [[ -z "$svc_names" ]]; then
+            die "No services configured for $project"
+        fi
+        while IFS= read -r svc; do
+            [[ -z "$svc" ]] && continue
+            local log_file
+            log_file=$(get_service_log_path "$project" "$branch" "$svc")
+            echo -e "${BOLD}=== $svc ===${NC}"
+            if [[ -f "$log_file" ]]; then
+                tail -n "$lines" "$log_file"
+            else
+                echo "(no log file yet: $log_file)"
+            fi
+            echo ""
+        done <<< "$svc_names"
+        return 0
+    fi
+
+    # Target is required to be a service name in non-tmux mode (pane index
+    # makes no sense without panes).
+    if [[ "$target" =~ ^[0-9]+$ ]]; then
+        die "Numeric pane targets are not supported under '$mux_name' multiplexer. Pass a service name."
+    fi
+
+    local log_file
+    log_file=$(get_service_log_path "$project" "$branch" "$target")
+    if [[ ! -f "$log_file" ]]; then
+        die "No log file for service '$target' at: $log_file"
+    fi
+    tail -n "$lines" "$log_file"
+}
+
 show_logs_help() {
     cat << 'EOF'
 Usage: wt logs [branch] [service|pane_index] [options]
        wt logs [service|pane_index] [options]  (inside worktree)
 
-Capture and display tmux pane output for a worktree.
+Display log output for a worktree's services. Under tmux/dmux this
+captures the pane output directly; under herdr/none it tails the
+on-disk log files written by 'wt start'.
 
 Arguments:
   <branch>          Branch name (auto-detected inside worktree)
-  <service>         Service name to capture (resolved to pane index)
-  <pane_index>      Numeric pane index to capture directly
+  <service>         Service name (or pane index — tmux/dmux only)
 
 Options:
   --lines, -n N     Number of lines to capture (default: 50)
-  --all, -a         Show output from all panes
+  --all, -a         Show output from all services/panes
   -p, --project     Project name (auto-detected if not specified)
   -h, --help        Show this help message
 

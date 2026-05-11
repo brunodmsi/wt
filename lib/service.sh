@@ -202,27 +202,54 @@ start_service() {
     # Update state with real PID
     update_service_status "$project" "$branch" "$service_name" "running" "$svc_pid" "$port"
 
-    # Wire up tail -f in the designated tmux pane so output is visible
-    local pane_idx
-    pane_idx=$(find_service_pane_index "$config_file" "$service_name") || true
+    # Wire up tail -f in the designated tmux pane so output is visible.
+    # Only do this under tmux/dmux; under herdr/none we have no pane to target,
+    # so point the user at the log file instead.
+    local _start_mux
+    _start_mux=$(detect_multiplexer)
+    case "$_start_mux" in
+        tmux|dmux)
+            local pane_idx
+            pane_idx=$(find_service_pane_index "$config_file" "$service_name") || true
 
-    if [[ -n "$pane_idx" ]]; then
-        # Only send C-c if we are NOT inside the target pane.
-        # If wt start was called from the service pane itself, C-c would
-        # interrupt wt start rather than the old tail. In that case, skip it —
-        # wt start exits normally and the shell then runs the queued tail -f.
-        local target_pane_id current_pane_id
-        target_pane_id=$(tmux display-message -t "${tmux_session}:${window_name}.${pane_idx}" -p "#{pane_id}" 2>/dev/null || true)
-        current_pane_id="${TMUX_PANE:-}"
-        if [[ -z "$current_pane_id" ]] || [[ "$current_pane_id" != "$target_pane_id" ]]; then
-            tmux send-keys -t "${tmux_session}:${window_name}.${pane_idx}" C-c
-        fi
-        tmux send-keys -t "${tmux_session}:${window_name}.${pane_idx}" "tail -n 200 -f '${log_file}'" Enter
-    else
-        # No pane configured — create a dedicated window and tail there
-        tmux new-window -d -t "$tmux_session" -n "${window_name}-${service_name}" -c "$exec_dir"
-        tmux send-keys -t "${tmux_session}:${window_name}-${service_name}" "tail -n 200 -f '${log_file}'" Enter
-    fi
+            if [[ -n "$pane_idx" ]]; then
+                # Only send C-c if we are NOT inside the target pane.
+                # If wt start was called from the service pane itself, C-c would
+                # interrupt wt start rather than the old tail. In that case, skip it —
+                # wt start exits normally and the shell then runs the queued tail -f.
+                local target_pane_id current_pane_id
+                target_pane_id=$(tmux display-message -t "${tmux_session}:${window_name}.${pane_idx}" -p "#{pane_id}" 2>/dev/null || true)
+                current_pane_id="${TMUX_PANE:-}"
+                if [[ -z "$current_pane_id" ]] || [[ "$current_pane_id" != "$target_pane_id" ]]; then
+                    tmux send-keys -t "${tmux_session}:${window_name}.${pane_idx}" C-c
+                fi
+                tmux send-keys -t "${tmux_session}:${window_name}.${pane_idx}" "tail -n 200 -f '${log_file}'" Enter
+            else
+                # No pane configured — create a dedicated window and tail there
+                tmux new-window -d -t "$tmux_session" -n "${window_name}-${service_name}" -c "$exec_dir"
+                tmux send-keys -t "${tmux_session}:${window_name}-${service_name}" "tail -n 200 -f '${log_file}'" Enter
+            fi
+            ;;
+        herdr)
+            # If layout mount stored a pane_id for this service, send the
+            # tail-f command into that pane so output is visible. Otherwise
+            # point the user at `wt logs`.
+            local _herdr_pane_id
+            _herdr_pane_id=$(get_service_state "$project" "$branch" "$service_name" "pane_id")
+            if [[ -n "$_herdr_pane_id" ]] && [[ "$_herdr_pane_id" != "null" ]] && command_exists herdr; then
+                herdr pane run "$_herdr_pane_id" "tail -n 200 -f '${log_file}'" >/dev/null 2>&1 \
+                    && log_info "Tailing log in herdr pane $_herdr_pane_id" \
+                    || log_warn "Failed to start tail in herdr pane $_herdr_pane_id"
+            else
+                log_info "Service '$service_name' running (PID $svc_pid). Tail logs with: wt logs $branch $service_name"
+            fi
+            log_debug "Log file: $log_file"
+            ;;
+        *)
+            log_info "Service '$service_name' running (PID $svc_pid). Tail logs with: wt logs $branch $service_name"
+            log_debug "Log file: $log_file"
+            ;;
+    esac
 
     # Run health check if configured
     local health_type

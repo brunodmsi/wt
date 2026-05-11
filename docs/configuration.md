@@ -262,17 +262,55 @@ accordingly. Detection order:
 
 dmux runs on top of tmux, so wt drives it through the same tmux backend.
 
-For **herdr**, `wt create` calls `herdr tab create --cwd <path> --label <branch>` in
-the active workspace, and `wt attach` looks up the tab by label with `herdr tab list`
-and focuses it via `herdr tab focus`. The lookup is filtered to the active workspace
-(`HERDR_ACTIVE_WORKSPACE_ID`) when set, so tabs with the same branch label in
-different projects do not collide. `jq` is required for the attach lookup.
+For **herdr**, wt is now first-class:
 
-Multi-pane layouts (`tmux.layout` with more than one pane) and the service
-lifecycle commands (`wt start`, `wt stop`, `wt restart`, `wt status`) are not
-yet wired through the herdr backend — they still drive tmux directly. When
-herdr is active and the project config defines multiple panes, `wt create`
-warns that the layout will not be reproduced inside the herdr tab.
+- `wt create` calls `herdr tab create --cwd <path> --label <branch>`, then
+  mounts the configured `tmux.layout` inside the new tab using `pane.split`,
+  and queues `cd <dir>` plus per-pane commands in each resulting pane.
+  Service panes get their `working_dir` and a placeholder comment; command
+  panes get their `command` string. The per-service `pane_id` is persisted
+  to state so `wt start` can route the log-tail into the right pane.
+- `wt attach` looks up the tab by label via `herdr tab list` and focuses
+  it with `herdr tab focus`. When the tab is missing, it creates one (with
+  the same layout mount) and runs `herdr.post_attach` in the orchestrator
+  pane.
+- `wt attach --here` skips tab handling and operates on the caller's
+  current pane: it `pane.run`s `cd <wt_path>` and (optionally) the
+  `herdr.post_attach` commands. Requires `HERDR_ACTIVE_PANE_ID` to be set.
+- `wt delete` closes the herdr tab via `herdr tab close`.
+- `wt start` looks up the persisted `pane_id` for each service and sends
+  `tail -n 200 -f <log_file>` into that pane via `herdr pane run`, so the
+  service's output is visible immediately. Services themselves remain
+  detached background processes — the pane only hosts the tail.
+- `wt logs` falls back to reading the on-disk log file
+  (`~/.local/share/wt/logs/<project>/<branch>/<svc>.log`) when running
+  under herdr, since there is no tmux pane to capture from.
+
+#### herdr-specific config
+
+```yaml
+herdr:
+  post_create:
+    - "pnpm dev"
+    - "echo ready"
+  post_attach:
+    - "git status"
+```
+
+- `post_create` runs after `wt create` mounts the herdr tab.
+- `post_attach` runs after `wt attach` creates a new tab (existing-tab
+  focus skips it, by design, so repeated attaches don't re-fire side
+  effects).
+- Both lists run in the **last pane** of the mounted layout (the
+  orchestrator-style bottom-right position for `services-top-2`),
+  falling back to the single initial pane when no layout is mounted.
+
+#### Requirements & limitations under herdr
+
+- `jq` is required (parses herdr CLI JSON responses).
+- Pane sizes follow herdr's default (roughly 50/50 per split). Percentage
+  sizing isn't available in herdr's `pane.split` yet, so layouts will not
+  match tmux pixel-for-pixel.
 
 Set `WT_MULTIPLEXER=tmux` to force the tmux backend even when herdr is
 detected.
