@@ -75,7 +75,7 @@ cmd_attach() {
             fi
 
             local _attach_tab_id
-            _attach_tab_id=$(herdr tab list "${_herdr_tab_list_args[@]}" 2>/dev/null \
+            _attach_tab_id=$(herdr tab list ${_herdr_tab_list_args[@]+"${_herdr_tab_list_args[@]}"} 2>/dev/null \
                 | jq -r --arg L "$_attach_label" '.result.tabs[]? | select(.label == $L) | .tab_id' 2>/dev/null \
                 | head -1)
             if [[ -n "$_attach_tab_id" ]]; then
