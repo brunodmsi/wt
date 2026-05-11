@@ -11,6 +11,7 @@ setup() {
     load_lib "state"
     load_lib "worktree"
     load_lib "setup"
+    load_lib "multiplexer"
     load_lib "tmux"
     load_lib "service"
 }
@@ -442,5 +443,64 @@ tmux:
 
     local stored_pid
     stored_pid=$(get_service_state "testproj2" "main" "api" "pid")
+    kill "$stored_pid" 2>/dev/null || true
+}
+
+@test "start_service does not call tmux when multiplexer is herdr" {
+    export WT_LOG_DIR="$TEST_TMPDIR/logs"
+    export WT_MULTIPLEXER="herdr"
+
+    local repo="$TEST_TMPDIR/repo3"
+    git init "$repo" --initial-branch=main > /dev/null 2>&1 || git init "$repo" > /dev/null 2>&1
+    git -C "$repo" commit --allow-empty -m "init" > /dev/null 2>&1
+
+    create_worktree_state "testprojh" "main" "$repo" 0
+
+    # tmux stub that records calls — start_service must not invoke it.
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/tmux" <<EOF
+#!/bin/bash
+echo "TMUX_CALL: \$*" >> "$TEST_TMPDIR/tmux_calls.log"
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/tmux"
+    : > "$TEST_TMPDIR/tmux_calls.log"
+    export PATH="$TEST_TMPDIR/bin:$PATH"
+
+    create_yaml_fixture "$TEST_TMPDIR/config3.yaml" "name: testprojh
+repo_path: $repo
+ports:
+  reserved:
+    range: {min: 19100, max: 19105}
+    slots: 3
+    services:
+      api: 0
+services:
+  - name: api
+    command: sleep 60
+    port_key: api
+tmux:
+  session: test
+  windows:
+    - name: dev
+      panes:
+        - service: api"
+
+    export PROJECT_CONFIG_FILE="$TEST_TMPDIR/config3.yaml"
+    claim_slot "testprojh" "main" 3
+
+    start_service "testprojh" "main" "api" "$TEST_TMPDIR/config3.yaml"
+
+    local stored_pid
+    stored_pid=$(get_service_state "testprojh" "main" "api" "pid")
+    [[ -n "$stored_pid" ]] && [[ "$stored_pid" != "null" ]]
+
+    # No send-keys / new-window calls should have hit the tmux stub.
+    [[ ! -s "$TEST_TMPDIR/tmux_calls.log" ]] || {
+        echo "Unexpected tmux calls under herdr:"
+        cat "$TEST_TMPDIR/tmux_calls.log"
+        false
+    }
+
     kill "$stored_pid" 2>/dev/null || true
 }

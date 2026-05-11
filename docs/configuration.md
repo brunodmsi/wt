@@ -268,11 +268,16 @@ and focuses it via `herdr tab focus`. The lookup is filtered to the active works
 (`HERDR_ACTIVE_WORKSPACE_ID`) when set, so tabs with the same branch label in
 different projects do not collide. `jq` is required for the attach lookup.
 
-Multi-pane layouts (`tmux.layout` with more than one pane) and the service
-lifecycle commands (`wt start`, `wt stop`, `wt restart`, `wt status`) are not
-yet wired through the herdr backend — they still drive tmux directly. When
-herdr is active and the project config defines multiple panes, `wt create`
-warns that the layout will not be reproduced inside the herdr tab.
+Multi-pane layouts (`tmux.layout` with more than one pane) are not yet
+reproduced inside the herdr tab; the layout is silently skipped and `wt
+create` warns when the project config defines multiple panes.
+
+The service lifecycle works under herdr because services run as detached
+background processes (see `lib/service.sh` `start_service`) — ports bind,
+health checks run, `wt stop`/`restart` operate on PIDs. The only herdr-aware
+piece is that `start_service` skips the tmux pane-tail wire-up and `wt logs`
+tails the on-disk log files (`~/.local/share/wt/logs/<project>/<branch>/<svc>.log`)
+instead of capturing a tmux pane.
 
 Set `WT_MULTIPLEXER=tmux` to force the tmux backend even when herdr is
 detected.

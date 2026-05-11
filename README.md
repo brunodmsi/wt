@@ -148,9 +148,10 @@ Max 3 concurrent worktrees can use reserved ports. Dynamic services get determin
 - **tmux** — full window/pane/layout/service orchestration (default).
 - **dmux** ([dmux.ai](https://dmux.ai)) — driven through tmux underneath.
 - **herdr** ([herdr.dev](https://herdr.dev)) — opens a single tab at the worktree path via
-  `herdr tab create`. `wt attach` focuses an existing tab via `herdr tab focus`. Multi-pane
-  layouts and `wt start`/`stop`/`restart`/`status` are not yet wired through herdr; services
-  will not be launched in the new tab.
+  `herdr tab create`. `wt attach` focuses an existing tab via `herdr tab focus`. Services
+  launch as detached background processes (same as tmux mode); `wt logs` tails the on-disk
+  log files instead of `tmux capture-pane`. The project's multi-pane tmux layout itself is
+  not reproduced inside the herdr tab — see issue #10.
 - **none** — worktree is created, but no multiplexer integration runs.
 - Set `WT_MULTIPLEXER=tmux|dmux|herdr|none` to override detection. Run `wt doctor` to see what's detected.
 - `jq` is required for `wt attach` under herdr (to look up the existing tab).
