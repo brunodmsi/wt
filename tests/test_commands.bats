@@ -388,6 +388,45 @@ hooks:
     [[ "$new_slot" == "$slot" ]]
 }
 
+@test "delete: cleans up state-only orphan (session set, path/slot missing)" {
+    # Reproduces the dangling-worktree case where `wt list` shows a branch
+    # but only its session field is populated (e.g. interrupted `wt create`
+    # crashed before path/slot got written). Without the fix, cmd_delete
+    # checked only get_worktree_state("path") and died.
+    _create_test_config "testproj"
+    load_project_config "testproj"
+    set_session_state "testproj" "ghost-branch" "ghost-branch"
+
+    # Sanity: list shows the branch but no path
+    [[ -n "$(list_worktree_states testproj | grep -x ghost-branch)" ]]
+    [[ -z "$(get_worktree_state testproj ghost-branch path)" ]]
+    [[ -z "$(get_slot_for_worktree testproj ghost-branch)" ]]
+    # worktree_state_exists must return success for this row
+    worktree_state_exists "testproj" "ghost-branch"
+
+    run bash -c '
+        source "$WT_SCRIPT_DIR/lib/utils.sh"
+        source "$WT_SCRIPT_DIR/lib/config.sh"
+        source "$WT_SCRIPT_DIR/lib/port.sh"
+        source "$WT_SCRIPT_DIR/lib/state.sh"
+        source "$WT_SCRIPT_DIR/lib/worktree.sh"
+        source "$WT_SCRIPT_DIR/lib/setup.sh"
+        source "$WT_SCRIPT_DIR/lib/multiplexer.sh"
+        source "$WT_SCRIPT_DIR/lib/tmux.sh"
+        source "$WT_SCRIPT_DIR/lib/service.sh"
+        source "$WT_SCRIPT_DIR/commands/delete.sh"
+        export WT_STATE_DIR="'"$WT_STATE_DIR"'"
+        export WT_PROJECTS_DIR="'"$WT_PROJECTS_DIR"'"
+        export WT_MULTIPLEXER=none
+        cmd_delete -f -p testproj "ghost-branch"
+    '
+    [[ "$status" -eq 0 ]]
+
+    # State row should be gone after delete
+    run worktree_state_exists "testproj" "ghost-branch"
+    [[ "$status" -ne 0 ]]
+}
+
 @test "delete: dies with no state and no directory" {
     _create_test_config "testproj"
     load_project_config "testproj"

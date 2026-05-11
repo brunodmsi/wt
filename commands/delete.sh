@@ -56,12 +56,16 @@ cmd_delete() {
     local wt_on_disk=1
     if ! worktree_exists "$branch" "$repo_root"; then
         wt_on_disk=0
-        # Check if there's orphaned state or slot to clean up
-        local has_state
-        has_state=$(get_worktree_state "$project" "$branch" "path")
+        # Check if there's orphaned state or slot to clean up. We check the
+        # existence of the state key itself (not just .path) so partially-
+        # initialised rows from a crashed `wt create` are still deletable.
+        local has_state_key=0
+        if worktree_state_exists "$project" "$branch"; then
+            has_state_key=1
+        fi
         local has_slot
         has_slot=$(get_slot_for_worktree "$project" "$branch")
-        if [[ -z "$has_state" ]] && [[ -z "$has_slot" ]]; then
+        if [[ "$has_state_key" -eq 0 ]] && [[ -z "$has_slot" ]]; then
             die "Worktree not found for branch: $branch"
         fi
         log_warn "Worktree directory not found, cleaning up orphaned state..."
