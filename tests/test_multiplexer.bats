@@ -424,6 +424,64 @@ EOF
     [[ "$output" == *"No herdr tab with label 'ghost' found"* ]]
 }
 
+@test "multiplexer_close_tab from non-herdr mux still closes the herdr tab" {
+    # The realistic scenario: user runs `wt delete` from a plain shell
+    # (or tmux), but the worktree was created from inside herdr and its
+    # tab is still around in a running herdr session.
+    export WT_MULTIPLEXER="tmux"   # detected mux is NOT herdr
+    export HERDR_STUB_LOG="$TEST_TMPDIR/herdr.log"
+    : > "$HERDR_STUB_LOG"
+
+    mkdir -p "$TEST_TMPDIR/bin"
+    # tmux stub: succeeds for kill_session but records nothing relevant.
+    cat > "$TEST_TMPDIR/bin/tmux" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/tmux"
+
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/bin/bash
+log="${HERDR_STUB_LOG:-/dev/null}"
+echo "HERDR_CALL: $*" >> "$log"
+case "$1 $2" in
+    "tab list")
+        echo '{"id":"req","result":{"type":"tab_list","tabs":[{"tab_id":"w1:9","label":"orphan"}]}}'
+        ;;
+    "tab close") echo '{}' ;;
+esac
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+
+    PATH="$TEST_TMPDIR/bin:$PATH" run multiplexer_close_tab "orphan" "/tmp/cfg.yml"
+    [ "$status" -eq 0 ]
+    log=$(cat "$HERDR_STUB_LOG")
+    [[ "$log" == *"tab close w1:9"* ]]
+}
+
+@test "multiplexer_close_tab is silent when herdr CLI is unreachable" {
+    # herdr CLI exists but the daemon isn't running (tab list errors).
+    export WT_MULTIPLEXER="tmux"
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/tmux" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/tmux"
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/bin/bash
+echo "herdr: failed to connect to socket" >&2
+exit 1
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+
+    PATH="$TEST_TMPDIR/bin:$PATH" run multiplexer_close_tab "anything" "/tmp/cfg.yml" 2>&1
+    [ "$status" -eq 0 ]
+    # No noise — we don't want to spam the user when herdr just isn't running.
+    [[ "$output" != *"herdr"* ]] || [[ "$output" != *"failed"* ]]
+}
+
 @test "multiplexer_close_tab herdr falls back to unscoped lookup across workspaces" {
     export WT_MULTIPLEXER="herdr"
     # Simulate user running wt delete from a pane in a DIFFERENT workspace
