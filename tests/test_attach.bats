@@ -88,14 +88,56 @@ $extra"
     [[ "$log" != *"tab focus"* ]]
 }
 
-@test "attach --here dies without HERDR_ACTIVE_PANE_ID under herdr" {
+@test "attach --here falls back to socket lookup when HERDR_ACTIVE_PANE_ID is unset" {
     export WT_MULTIPLEXER="herdr"
-    stub_herdr
+
+    mkdir -p "$TEST_TMPDIR/bin"
+    # Stub returns a focused pane via pane.list so the fallback resolves it.
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/bin/bash
+log="${HERDR_STUB_LOG:-/dev/null}"
+echo "HERDR_CALL: $*" >> "$log"
+case "$1 $2" in
+    "pane list")
+        echo '{"id":"req","result":{"type":"pane_list","panes":[{"pane_id":"w2-4","focused":true},{"pane_id":"w2-5","focused":false}]}}'
+        ;;
+    "pane run") echo '{}' ;;
+esac
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+    export HERDR_STUB_LOG="$TEST_TMPDIR/herdr.log"
+    : > "$HERDR_STUB_LOG"
+    export PATH="$TEST_TMPDIR/bin:$PATH"
+
     seed_project "herdrhere2" "main"
 
-    run cmd_attach main -p herdrhere2 --here 2>&1
+    run cmd_attach main -p herdrhere2 --here
+    [ "$status" -eq 0 ]
+    log=$(cat "$HERDR_STUB_LOG")
+    [[ "$log" == *"pane list"* ]]
+    [[ "$log" == *"pane run w2-4 cd "* ]]
+}
+
+@test "attach --here dies when no focused pane can be resolved" {
+    export WT_MULTIPLEXER="herdr"
+
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/bin/bash
+case "$1 $2" in
+    "pane list") echo '{"id":"req","result":{"type":"pane_list","panes":[]}}' ;;
+esac
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+    export PATH="$TEST_TMPDIR/bin:$PATH"
+
+    seed_project "herdrhere3" "main"
+
+    run cmd_attach main -p herdrhere3 --here 2>&1
     [ "$status" -ne 0 ]
-    [[ "$output" == *"HERDR_ACTIVE_PANE_ID"* ]]
+    [[ "$output" == *"focused herdr pane"* ]]
 }
 
 @test "attach --here errors when worktree path is missing" {

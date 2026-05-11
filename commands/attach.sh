@@ -155,17 +155,30 @@ _attach_here_in_current_pane() {
 
     case "$mux" in
         herdr)
+            command_exists herdr || die "herdr CLI not found in PATH."
+
+            # HERDR_ACTIVE_PANE_ID is only set for keybind-launched commands,
+            # not interactive pane shells, so fall back to querying the
+            # socket for the focused pane.
             local pane_id="${HERDR_ACTIVE_PANE_ID:-}"
             if [[ -z "$pane_id" ]]; then
-                die "HERDR_ACTIVE_PANE_ID is not set — run 'wt attach --here' inside a herdr pane."
+                if ! command_exists jq; then
+                    die "Cannot determine current herdr pane without jq. Install with 'brew install jq'."
+                fi
+                pane_id=$(herdr pane list 2>/dev/null \
+                    | jq -r '.result.panes[]? | select(.focused == true) | .pane_id' 2>/dev/null \
+                    | head -1)
             fi
-            command_exists herdr || die "herdr CLI not found in PATH."
+            if [[ -z "$pane_id" ]]; then
+                die "Could not resolve the focused herdr pane. Are you running this from inside herdr?"
+            fi
+
             herdr pane run "$pane_id" "cd '$wt_path'" >/dev/null 2>&1 \
                 || { log_warn "Failed to cd in current herdr pane"; return 1; }
             if [[ -n "$post_cmds" ]]; then
                 herdr_run_commands_in_pane "$pane_id" "$post_cmds"
             fi
-            log_success "Attached --here to $branch in current herdr pane"
+            log_success "Attached --here to $branch in herdr pane $pane_id"
             return 0
             ;;
         tmux|dmux)
