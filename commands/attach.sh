@@ -103,8 +103,10 @@ cmd_attach() {
             fi
 
             # Tab missing — create a new one. Run post_attach (not post_create)
-            # because the user invoked `wt attach`.
-            _attach_create_herdr_tab "$_attach_label" "$_attach_wt_path"
+            # because the user invoked `wt attach`. Layout mount is shared
+            # with `wt create` via multiplexer_open_tab_herdr.
+            multiplexer_open_tab_herdr "$_attach_label" "$_attach_wt_path" 0 \
+                "$project" "$branch" "$PROJECT_CONFIG_FILE" "post_attach"
             return $?
             ;;
         none)
@@ -187,40 +189,6 @@ _attach_here_in_current_pane() {
     esac
 }
 
-# Create a fresh herdr tab during `wt attach` (the existing tab was not
-# found). Runs herdr.post_attach in the new pane.
-_attach_create_herdr_tab() {
-    local label="$1"
-    local wt_path="$2"
-
-    local out
-    if ! out=$(herdr tab create --cwd "$wt_path" --label "$label" --focus 2>&1); then
-        log_warn "herdr tab create failed: $out"
-        log_info "Open a new tab in herdr and run: cd '$wt_path'"
-        return 1
-    fi
-    log_success "Opened herdr tab '$label'"
-
-    local post_cmds
-    post_cmds=$(herdr_get_commands "${PROJECT_CONFIG_FILE:-}" "post_attach")
-    [[ -z "$post_cmds" ]] && return 0
-
-    if ! command_exists jq; then
-        log_warn "jq missing; skipping herdr.post_attach commands"
-        return 0
-    fi
-
-    local tab_id pane_id
-    tab_id=$(echo "$out" | jq -r '.result.tab.tab_id // empty' 2>/dev/null)
-    [[ -z "$tab_id" ]] && { log_warn "Could not parse tab_id; skipping post_attach"; return 0; }
-
-    pane_id=$(herdr_get_pane_for_tab "$tab_id")
-    [[ -z "$pane_id" ]] && { log_warn "Could not resolve pane for new tab; skipping post_attach"; return 0; }
-
-    log_info "Running herdr.post_attach in pane $pane_id"
-    herdr_run_commands_in_pane "$pane_id" "$post_cmds"
-    return 0
-}
 
 show_attach_help() {
     cat << 'EOF'

@@ -140,29 +140,25 @@ services:
   - name: svc-a"
     run multiplexer_warn_dropped_features "$cfg"
     [ "$status" -eq 0 ]
-    [[ "$output" != *"herdr backend"* ]]
+    [ -z "$output" ]
 }
 
-@test "multiplexer_warn_dropped_features warns under herdr with multi-pane config" {
+@test "multiplexer_warn_dropped_features warns about missing jq under herdr w/ multi-pane" {
     export WT_MULTIPLEXER="herdr"
+    command_exists() { [[ "$1" != "jq" ]]; }
     local cfg="$TEST_TMPDIR/cfg.yml"
     create_yaml_fixture "$cfg" "tmux:
   windows:
     - name: dev
       panes:
         - command: 'a'
-        - command: 'b'
-        - command: 'c'
-services:
-  - name: svc-a"
+        - command: 'b'"
     run multiplexer_warn_dropped_features "$cfg"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"herdr backend"* ]]
-    [[ "$output" == *"Panes in config: 3"* ]]
-    [[ "$output" == *"Services: 1"* ]]
+    [[ "$output" == *"layout mount needs jq"* ]]
 }
 
-@test "multiplexer_warn_dropped_features silent under herdr with single-pane no-services config" {
+@test "multiplexer_warn_dropped_features silent under herdr single-pane" {
     export WT_MULTIPLEXER="herdr"
     local cfg="$TEST_TMPDIR/cfg.yml"
     create_yaml_fixture "$cfg" "tmux:
@@ -172,7 +168,7 @@ services:
         - command: 'a'"
     run multiplexer_warn_dropped_features "$cfg"
     [ "$status" -eq 0 ]
-    [[ "$output" != *"herdr backend"* ]]
+    [ -z "$output" ]
 }
 
 @test "herdr_get_commands returns post_create list" {
@@ -259,6 +255,171 @@ EOF
     [[ "$log" == *"tab create"* ]]
     [[ "$log" != *"pane list"* ]]
     [[ "$log" != *"pane run"* ]]
+}
+
+@test "herdr layout mount services-top-2 issues 3 splits + post_create lands in last pane" {
+    export WT_MULTIPLEXER="herdr"
+    export HERDR_STUB_LOG="$TEST_TMPDIR/herdr.log"
+    : > "$HERDR_STUB_LOG"
+
+    mkdir -p "$TEST_TMPDIR/bin"
+    # Stub herdr that mints incrementing pane ids per split.
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/bin/bash
+log="${HERDR_STUB_LOG:-/dev/null}"
+echo "HERDR_CALL: $*" >> "$log"
+case "$1 $2" in
+    "tab create")
+        echo '{"id":"req","result":{"type":"tab_info","tab":{"tab_id":"w1:1"}}}'
+        ;;
+    "pane list")
+        echo '{"id":"req","result":{"type":"pane_list","panes":[{"pane_id":"w1-1","tab_id":"w1:1"}]}}'
+        ;;
+    "pane split")
+        # Use the call count to mint a fresh id (w1-2, w1-3, w1-4).
+        n=$(grep -c "pane split" "$log")
+        echo "{\"id\":\"req\",\"result\":{\"type\":\"pane_info\",\"pane\":{\"pane_id\":\"w1-$((n + 1))\"}}}"
+        ;;
+    "pane run") echo '{}' ;;
+esac
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+
+    local cfg="$TEST_TMPDIR/cfg.yml"
+    create_yaml_fixture "$cfg" "tmux:
+  layout: services-top-2
+  windows:
+    - name: dev
+      panes:
+        - service: api
+        - service: web
+        - command: ''
+        - command: ''
+services:
+  - name: api
+    working_dir: api
+  - name: web
+    working_dir: web
+herdr:
+  post_create:
+    - 'echo orchestrator'"
+
+    # Use real state dirs (setup_test_dirs already exported WT_STATE_DIR).
+    load_lib state
+    PATH="$TEST_TMPDIR/bin:$PATH" run multiplexer_open_tab "branch-x" "/tmp/wt" "$cfg" 0 "p" "branch-x"
+    [ "$status" -eq 0 ]
+
+    log=$(cat "$HERDR_STUB_LOG")
+    # Exactly 3 splits for 4-pane services-top-2.
+    splits=$(grep -c "pane split " <<< "$log")
+    [ "$splits" -eq 3 ]
+    [[ "$log" == *"pane split w1-1 --direction down"* ]]
+    [[ "$log" == *"pane split w1-1 --direction right"* ]]
+    # post_create should land in the LAST pane (w1-4).
+    [[ "$log" == *"pane run w1-4 echo orchestrator"* ]]
+    # Service panes should have got their cd commands routed.
+    [[ "$log" == *"cd '/tmp/wt/api'"* ]]
+    [[ "$log" == *"cd '/tmp/wt/web'"* ]]
+}
+
+@test "herdr layout mount persists service pane_id to state" {
+    export WT_MULTIPLEXER="herdr"
+    export HERDR_STUB_LOG="$TEST_TMPDIR/herdr.log"
+    : > "$HERDR_STUB_LOG"
+
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/bin/bash
+log="${HERDR_STUB_LOG:-/dev/null}"
+echo "HERDR_CALL: $*" >> "$log"
+case "$1 $2" in
+    "tab create") echo '{"id":"req","result":{"type":"tab_info","tab":{"tab_id":"t1"}}}' ;;
+    "pane list")  echo '{"id":"req","result":{"type":"pane_list","panes":[{"pane_id":"p1","tab_id":"t1"}]}}' ;;
+    "pane split")
+        n=$(grep -c "pane split" "$log")
+        echo "{\"result\":{\"pane\":{\"pane_id\":\"p$((n + 1))\"}}}"
+        ;;
+    "pane run") echo '{}' ;;
+esac
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+
+    local cfg="$TEST_TMPDIR/cfg.yml"
+    create_yaml_fixture "$cfg" "tmux:
+  layout: services-top-2
+  windows:
+    - name: dev
+      panes:
+        - service: api
+        - service: web
+        - command: ''
+        - command: ''
+services:
+  - name: api
+  - name: web"
+
+    load_lib state
+    PATH="$TEST_TMPDIR/bin:$PATH" multiplexer_open_tab "branch-x" "/tmp/wt" "$cfg" 0 "p" "branch-x" >/dev/null 2>&1
+
+    # services-top-2 split sequence (mirrors lib/tmux.sh):
+    #   1. split p1 down  -> p2 (bottom-left, config[2])
+    #   2. split p1 right -> p3 (top-right, config[1] = web)
+    #   3. split p2 right -> p4 (bottom-right, config[3])
+    # So api (config[0]) lives in p1, web (config[1]) lives in p3.
+    [[ "$(get_service_state p branch-x api pane_id)" == "p1" ]]
+    [[ "$(get_service_state p branch-x web pane_id)" == "p3" ]]
+}
+
+@test "multiplexer_close_tab herdr resolves label and calls tab close" {
+    export WT_MULTIPLEXER="herdr"
+    export HERDR_STUB_LOG="$TEST_TMPDIR/herdr.log"
+    : > "$HERDR_STUB_LOG"
+
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/bin/bash
+log="${HERDR_STUB_LOG:-/dev/null}"
+echo "HERDR_CALL: $*" >> "$log"
+case "$1 $2" in
+    "tab list")
+        echo '{"id":"req","result":{"type":"tab_list","tabs":[{"tab_id":"w1:3","label":"feature-x"}]}}'
+        ;;
+    "tab close") echo '{}' ;;
+esac
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+
+    PATH="$TEST_TMPDIR/bin:$PATH" run multiplexer_close_tab "feature-x" "/tmp/cfg.yml"
+    [ "$status" -eq 0 ]
+    log=$(cat "$HERDR_STUB_LOG")
+    [[ "$log" == *"tab list"* ]]
+    [[ "$log" == *"tab close w1:3"* ]]
+}
+
+@test "multiplexer_close_tab herdr is a no-op when label not present" {
+    export WT_MULTIPLEXER="herdr"
+    export HERDR_STUB_LOG="$TEST_TMPDIR/herdr.log"
+    : > "$HERDR_STUB_LOG"
+
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/bin/bash
+log="${HERDR_STUB_LOG:-/dev/null}"
+echo "HERDR_CALL: $*" >> "$log"
+case "$1 $2" in
+    "tab list") echo '{"id":"req","result":{"type":"tab_list","tabs":[]}}' ;;
+esac
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+
+    PATH="$TEST_TMPDIR/bin:$PATH" run multiplexer_close_tab "ghost" "/tmp/cfg.yml"
+    [ "$status" -eq 0 ]
+    log=$(cat "$HERDR_STUB_LOG")
+    [[ "$log" != *"tab close"* ]]
 }
 
 @test "multiplexer_session_label returns 'herdr' for herdr" {

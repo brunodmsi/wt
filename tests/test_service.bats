@@ -446,6 +446,59 @@ tmux:
     kill "$stored_pid" 2>/dev/null || true
 }
 
+@test "start_service tails into stored herdr pane_id" {
+    export WT_LOG_DIR="$TEST_TMPDIR/logs"
+    export WT_MULTIPLEXER="herdr"
+
+    local repo="$TEST_TMPDIR/repo-pane"
+    git init "$repo" --initial-branch=main > /dev/null 2>&1 || git init "$repo" > /dev/null 2>&1
+    git -C "$repo" commit --allow-empty -m init > /dev/null 2>&1
+
+    create_worktree_state "panep" "main" "$repo" 0
+
+    # herdr stub: log every call so we can assert pane run for the tail.
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<EOF
+#!/bin/bash
+echo "HERDR_CALL: \$*" >> "$TEST_TMPDIR/herdr.log"
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+    : > "$TEST_TMPDIR/herdr.log"
+    export PATH="$TEST_TMPDIR/bin:$PATH"
+
+    # Pre-populate the pane_id state — this is what herdr_configure_panes
+    # would have written during layout mount.
+    set_service_state "panep" "main" "api" "pane_id" "w1-7"
+
+    create_yaml_fixture "$TEST_TMPDIR/cfg-pane.yaml" "name: panep
+repo_path: $repo
+ports:
+  reserved:
+    range: {min: 19200, max: 19205}
+    slots: 3
+    services:
+      api: 0
+services:
+  - name: api
+    command: sleep 60
+    port_key: api"
+
+    export PROJECT_CONFIG_FILE="$TEST_TMPDIR/cfg-pane.yaml"
+    claim_slot "panep" "main" 3
+
+    start_service "panep" "main" "api" "$TEST_TMPDIR/cfg-pane.yaml"
+
+    local stored_pid
+    stored_pid=$(get_service_state "panep" "main" "api" "pid")
+    [[ -n "$stored_pid" ]] && [[ "$stored_pid" != "null" ]]
+
+    log=$(cat "$TEST_TMPDIR/herdr.log")
+    [[ "$log" == *"pane run w1-7 tail -n 200 -f "* ]]
+
+    kill "$stored_pid" 2>/dev/null || true
+}
+
 @test "start_service does not call tmux when multiplexer is herdr" {
     export WT_LOG_DIR="$TEST_TMPDIR/logs"
     export WT_MULTIPLEXER="herdr"

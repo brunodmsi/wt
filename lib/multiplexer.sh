@@ -54,13 +54,15 @@ detect_multiplexer() {
 }
 
 # Open a new tab/window in the detected multiplexer.
-# Args: window_name worktree_path config_file [no_attach]
-# Returns 0 on success, non-zero on failure.
+# Args: window_name root_dir config_file [no_attach] [project] [branch]
+# project + branch are required for herdr to persist per-pane state.
 multiplexer_open_tab() {
     local window_name="$1"
     local root_dir="$2"
     local config_file="$3"
     local no_attach="${4:-0}"
+    local project="${5:-}"
+    local branch="${6:-}"
 
     local mux
     mux=$(detect_multiplexer)
@@ -74,7 +76,7 @@ multiplexer_open_tab() {
             return $?
             ;;
         herdr)
-            multiplexer_open_tab_herdr "$window_name" "$root_dir" "$no_attach" "$config_file"
+            multiplexer_open_tab_herdr "$window_name" "$root_dir" "$no_attach" "$project" "$branch" "$config_file"
             return $?
             ;;
         none)
@@ -107,6 +109,177 @@ herdr_get_pane_for_tab() {
         | head -1
 }
 
+# Split a herdr pane and return the new pane_id.
+# Args: target_pane_id direction [cwd]
+# direction: "right" or "down"
+herdr_pane_split() {
+    local target="$1"
+    local direction="$2"
+    local cwd="${3:-}"
+    command_exists herdr || return 1
+    command_exists jq || return 1
+    local args=(pane split "$target" --direction "$direction" --no-focus)
+    [[ -n "$cwd" ]] && args+=(--cwd "$cwd")
+    local out
+    if ! out=$(herdr "${args[@]}" 2>&1); then
+        log_warn "herdr pane split failed: $out"
+        return 1
+    fi
+    echo "$out" | jq -r '.result.pane.pane_id // empty' 2>/dev/null
+}
+
+# Build a pane layout inside the new tab's initial pane, mirroring the
+# project's tmux.layout. Returns newline-separated pane_ids in config order
+# (config[0] -> first pane id, etc.).
+# Args: initial_pane_id config_file root_dir
+herdr_build_layout() {
+    local p0="$1"
+    local config_file="$2"
+    local root_dir="$3"
+
+    [[ -z "$p0" ]] && return 1
+    [[ ! -f "$config_file" ]] && { echo "$p0"; return 0; }
+
+    local layout pane_count
+    layout=$(yaml_get "$config_file" ".tmux.layout" "tiled")
+    pane_count=$(yq '[.tmux.windows[0].panes[]?] | length' "$config_file" 2>/dev/null || echo 0)
+    [[ "$pane_count" == "null" ]] && pane_count=0
+    [[ "$pane_count" -le 1 ]] && { echo "$p0"; return 0; }
+
+    case "$layout" in
+        services-top-2)
+            _herdr_layout_services_top_2 "$p0" "$root_dir"
+            return $?
+            ;;
+        services-top)
+            _herdr_layout_services_top "$p0" "$root_dir" "$pane_count"
+            return $?
+            ;;
+        *)
+            _herdr_layout_generic "$p0" "$root_dir" "$pane_count"
+            return $?
+            ;;
+    esac
+}
+
+# 4-pane services-top-2 layout. Splits mirror lib/tmux.sh:setup_services_top_2_layout
+# config order: 0=top-left, 1=top-right, 2=bottom-left, 3=bottom-right
+_herdr_layout_services_top_2() {
+    local p0="$1"
+    local cwd="$2"
+    local p1 p2 p3
+    p2=$(herdr_pane_split "$p0" "down" "$cwd") || return 1
+    p1=$(herdr_pane_split "$p0" "right" "$cwd") || return 1
+    p3=$(herdr_pane_split "$p2" "right" "$cwd") || return 1
+    printf '%s\n%s\n%s\n%s\n' "$p0" "$p1" "$p2" "$p3"
+}
+
+# 5-pane services-top layout: 3 service panes on top, 2 command panes bottom.
+# config order: 0=top-left, 1=top-mid, 2=top-right, 3=bottom-left, 4=bottom-right
+_herdr_layout_services_top() {
+    local p0="$1"
+    local cwd="$2"
+    local count="$3"
+    local p1 p2 p3 p4
+    p3=$(herdr_pane_split "$p0" "down" "$cwd") || return 1
+    p1=$(herdr_pane_split "$p0" "right" "$cwd") || return 1
+    p2=$(herdr_pane_split "$p1" "right" "$cwd") || return 1
+    if [[ "$count" -ge 5 ]]; then
+        p4=$(herdr_pane_split "$p3" "right" "$cwd") || return 1
+        printf '%s\n%s\n%s\n%s\n%s\n' "$p0" "$p1" "$p2" "$p3" "$p4"
+    else
+        printf '%s\n%s\n%s\n%s\n' "$p0" "$p1" "$p2" "$p3"
+    fi
+}
+
+# Generic layout: alternating right/down splits until N panes.
+_herdr_layout_generic() {
+    local p0="$1"
+    local cwd="$2"
+    local count="$3"
+    local panes=("$p0")
+    local i=1
+    while [[ "$i" -lt "$count" ]]; do
+        local target="${panes[$((i / 2))]}"
+        local direction
+        if (( i % 2 == 1 )); then
+            direction="right"
+        else
+            direction="down"
+        fi
+        local new_pid
+        new_pid=$(herdr_pane_split "$target" "$direction" "$cwd") || return 1
+        panes+=("$new_pid")
+        i=$((i + 1))
+    done
+    printf '%s\n' "${panes[@]}"
+}
+
+# Configure each pane from config: send `cd <dir>` and the comment/command
+# defined in config[i]. Stores pane_id back into state under
+# `worktrees.<branch>.services.<svc>.pane_id` and
+# `worktrees.<branch>.panes.<index>` for later lookup.
+# Args: project branch config_file root_dir pane_ids_multiline
+herdr_configure_panes() {
+    local project="$1"
+    local branch="$2"
+    local config_file="$3"
+    local root_dir="$4"
+    local pane_ids="$5"
+
+    local pane_count
+    pane_count=$(yq '[.tmux.windows[0].panes[]?] | length' "$config_file" 2>/dev/null || echo 0)
+    [[ "$pane_count" == "null" ]] && pane_count=0
+    [[ "$pane_count" -le 0 ]] && return 0
+
+    # Pre-fetch pane data + service working dirs (matches tmux flow).
+    local all_pane_data all_svc_dirs
+    all_pane_data=$(yq -r '.tmux.windows[0].panes[] | [.service // "", .command // "", .working_dir // ""] | @tsv' "$config_file" 2>/dev/null)
+    all_svc_dirs=$(yq -r '.services[]? | [.name, .working_dir // ""] | @tsv' "$config_file" 2>/dev/null)
+
+    local -a pane_arr=()
+    while IFS= read -r pid; do
+        [[ -n "$pid" ]] && pane_arr+=("$pid")
+    done <<< "$pane_ids"
+
+    local p=0
+    while IFS=$'\t' read -r pane_service pane_cmd pane_dir; do
+        [[ $p -ge $pane_count ]] && break
+        [[ $p -ge ${#pane_arr[@]} ]] && break
+        local pid="${pane_arr[$p]}"
+
+        if [[ -n "$pane_service" ]] && [[ "$pane_service" != "null" ]]; then
+            local svc_working_dir=""
+            while IFS=$'\t' read -r svc_name svc_dir; do
+                if [[ "$svc_name" == "$pane_service" ]]; then
+                    svc_working_dir="$svc_dir"
+                    break
+                fi
+            done <<< "$all_svc_dirs"
+
+            if [[ -n "$svc_working_dir" ]] && [[ "$svc_working_dir" != "null" ]] && [[ -n "$root_dir" ]]; then
+                herdr pane run "$pid" "cd '$root_dir/$svc_working_dir'" >/dev/null 2>&1 || true
+            fi
+            herdr pane run "$pid" "echo '# Service: $pane_service (use wt start to run)'" >/dev/null 2>&1 || true
+            # Persist pane_id under the service so start_service can find it
+            set_service_state "$project" "$branch" "$pane_service" "pane_id" "$pid"
+        elif [[ -n "$pane_cmd" ]] && [[ "$pane_cmd" != "null" ]] && [[ "$pane_cmd" != "" ]]; then
+            local target_dir="$root_dir"
+            if [[ -n "$pane_dir" ]] && [[ "$pane_dir" != "null" ]] && [[ "$pane_dir" != "." ]]; then
+                target_dir="$root_dir/$pane_dir"
+            fi
+            herdr pane run "$pid" "cd '$target_dir'" >/dev/null 2>&1 || true
+            herdr pane run "$pid" "$pane_cmd" >/dev/null 2>&1 || true
+        else
+            # Empty command pane (orchestrator-style)
+            [[ -n "$root_dir" ]] && herdr pane run "$pid" "cd '$root_dir'" >/dev/null 2>&1 || true
+        fi
+        p=$((p + 1))
+    done <<< "$all_pane_data"
+
+    return 0
+}
+
 # Run each newline-separated command in a herdr pane via `herdr pane run`.
 # Args: pane_id commands_multiline
 # Returns 0 even when individual commands fail (warns instead) so a single
@@ -130,13 +303,31 @@ herdr_run_commands_in_pane() {
 
 # herdr integration via `herdr tab create`.
 # Honors WT_HERDR_NO_FOCUS=1 (or no_attach) to skip --focus.
-# When a config_file is provided and defines `herdr.post_create`, each command
-# is queued into the new tab's pane via `herdr pane run`.
+#
+# Flow when a config_file is provided:
+#   1. tab create
+#   2. resolve initial pane_id
+#   3. if tmux.windows[0].panes has >1 entry, mount the layout via pane.split
+#      and persist pane_ids to state per service
+#   4. send `cd <dir>` and the configured command/comment to each pane
+#   5. run herdr.post_create in the LAST pane of the layout (the
+#      "orchestrator" position) — or in the initial pane when single-pane.
+#
+# Args: window_name root_dir no_attach [project branch config_file [hook_name]]
+# hook_name: "post_create" (default) or "post_attach" — selects which herdr.*
+# command list to run in the last pane after layout mount.
 multiplexer_open_tab_herdr() {
     local window_name="$1"
     local root_dir="$2"
     local no_attach="${3:-0}"
-    local config_file="${4:-}"
+    local project="" branch="" config_file="" hook_name="post_create"
+    if [[ $# -ge 7 ]]; then
+        project="${4:-}"; branch="${5:-}"; config_file="${6:-}"; hook_name="${7:-post_create}"
+    elif [[ $# -ge 6 ]]; then
+        project="${4:-}"; branch="${5:-}"; config_file="${6:-}"
+    elif [[ $# -ge 4 ]]; then
+        config_file="${4:-}"
+    fi
 
     if ! command_exists herdr; then
         log_warn "herdr environment detected but 'herdr' CLI not found in PATH"
@@ -159,37 +350,63 @@ multiplexer_open_tab_herdr() {
     log_success "Opened herdr tab '$window_name'"
     log_debug "$out"
 
-    # Run herdr.post_create commands in the new tab's pane, if any.
-    if [[ -n "$config_file" ]]; then
-        local post_cmds
-        post_cmds=$(herdr_get_commands "$config_file" "post_create")
-        if [[ -n "$post_cmds" ]]; then
-            if ! command_exists jq; then
-                log_warn "jq is required to run herdr.post_create commands (skipping)"
-            else
-                local tab_id pane_id
-                tab_id=$(echo "$out" | jq -r '.result.tab.tab_id // empty' 2>/dev/null)
-                if [[ -n "$tab_id" ]]; then
-                    pane_id=$(herdr_get_pane_for_tab "$tab_id")
-                    if [[ -n "$pane_id" ]]; then
-                        log_info "Running herdr.post_create commands in pane $pane_id"
-                        herdr_run_commands_in_pane "$pane_id" "$post_cmds"
-                    else
-                        log_warn "Could not resolve pane for new herdr tab $tab_id; skipping post_create"
-                    fi
-                else
-                    log_warn "Could not parse tab_id from herdr response; skipping post_create"
-                fi
+    # Without a config file we have nothing more to do.
+    [[ -z "$config_file" ]] && return 0
+
+    # Short-circuit when there's nothing to mount or run: no multi-pane
+    # layout AND no post_* commands. This avoids an extra `herdr pane list`
+    # round-trip for trivial configs.
+    local pane_count post_cmds
+    pane_count=$(yq '[.tmux.windows[0].panes[]?] | length' "$config_file" 2>/dev/null || echo 0)
+    [[ "$pane_count" == "null" ]] && pane_count=0
+    post_cmds=$(herdr_get_commands "$config_file" "$hook_name")
+    if [[ "$pane_count" -le 1 ]] && [[ -z "$post_cmds" ]]; then
+        return 0
+    fi
+
+    # Everything below needs jq to parse responses.
+    if ! command_exists jq; then
+        log_warn "jq missing; skipping herdr layout mount and post_$hook_name"
+        return 0
+    fi
+
+    local tab_id initial_pane
+    tab_id=$(echo "$out" | jq -r '.result.tab.tab_id // empty' 2>/dev/null)
+    [[ -z "$tab_id" ]] && { log_warn "Could not parse tab_id; skipping layout/$hook_name"; return 0; }
+    initial_pane=$(herdr_get_pane_for_tab "$tab_id")
+    [[ -z "$initial_pane" ]] && { log_warn "Could not resolve initial pane; skipping layout/$hook_name"; return 0; }
+
+    local last_pane="$initial_pane"
+
+    if [[ "$pane_count" -gt 1 ]]; then
+        log_info "Mounting herdr layout ($pane_count panes)"
+        local layout_pane_ids
+        if layout_pane_ids=$(herdr_build_layout "$initial_pane" "$config_file" "$root_dir"); then
+            if [[ -n "$project" ]] && [[ -n "$branch" ]]; then
+                herdr_configure_panes "$project" "$branch" "$config_file" "$root_dir" "$layout_pane_ids"
             fi
+            # The last pane id in the layout becomes the orchestrator target.
+            last_pane=$(echo "$layout_pane_ids" | awk 'NF{p=$0} END{print p}')
+        else
+            log_warn "Layout mount failed; falling back to single-pane tab"
         fi
+    fi
+
+    # Run herdr.<hook_name> in the orchestrator pane (last in layout, or
+    # the initial pane when single-pane). post_cmds was already loaded
+    # above for the short-circuit check.
+    if [[ -n "$post_cmds" ]] && [[ -n "$last_pane" ]]; then
+        log_info "Running herdr.$hook_name commands in pane $last_pane"
+        herdr_run_commands_in_pane "$last_pane" "$post_cmds"
     fi
 
     return 0
 }
 
-# Warn when the active multiplexer cannot reproduce the project's pane layout
-# or run services through it. herdr today only opens a single tab — multi-pane
-# layouts and `wt start` are still tmux-only, so we surface that at create time.
+# Warn about herdr-side limitations at create time. With layout mount in
+# place, only the truly missing pieces stay here: jq required for layout
+# mount, and the fact that herdr's pane.split is 50/50 (no percentage
+# sizing) so sizes won't match tmux exactly.
 # Args: config_file
 multiplexer_warn_dropped_features() {
     local config_file="$1"
@@ -198,18 +415,56 @@ multiplexer_warn_dropped_features() {
     [[ "$mux" != "herdr" ]] && return 0
     [[ ! -f "$config_file" ]] && return 0
 
-    local pane_count service_count
+    local pane_count
     pane_count=$(yq '[.tmux.windows[]?.panes[]?] | length' "$config_file" 2>/dev/null || echo 0)
-    service_count=$(yq '.services // [] | length' "$config_file" 2>/dev/null || echo 0)
     [[ "$pane_count" == "null" ]] && pane_count=0
-    [[ "$service_count" == "null" ]] && service_count=0
 
-    if [[ "$pane_count" -gt 1 ]] || [[ "$service_count" -gt 0 ]]; then
-        log_warn "herdr backend opens a single tab — project's multi-pane layout and services will not run inside it."
-        log_warn "  Panes in config: $pane_count   Services: $service_count"
-        log_warn "  'wt start' still drives tmux directly and will not target the herdr tab. Use WT_MULTIPLEXER=tmux to keep the full layout."
+    if [[ "$pane_count" -gt 1 ]] && ! command_exists jq; then
+        log_warn "herdr layout mount needs jq — install with 'brew install jq' or set WT_MULTIPLEXER=tmux."
     fi
     return 0
+}
+
+# Close the active multiplexer's window/tab for a given label. Used by
+# `wt delete` to clean up after a worktree.
+# Args: label config_file
+multiplexer_close_tab() {
+    local label="$1"
+    local config_file="$2"
+    local mux
+    mux=$(detect_multiplexer)
+
+    case "$mux" in
+        tmux|dmux)
+            kill_session "$label" "$config_file"
+            return $?
+            ;;
+        herdr)
+            command_exists herdr || return 0
+            command_exists jq || { log_warn "jq missing; cannot resolve herdr tab to close"; return 0; }
+
+            local tab_list_args=()
+            [[ -n "${HERDR_ACTIVE_WORKSPACE_ID:-}" ]] && tab_list_args+=(--workspace "$HERDR_ACTIVE_WORKSPACE_ID")
+
+            local tab_id
+            tab_id=$(herdr tab list ${tab_list_args[@]+"${tab_list_args[@]}"} 2>/dev/null \
+                | jq -r --arg L "$label" '.result.tabs[]? | select(.label == $L) | .tab_id' 2>/dev/null \
+                | head -1)
+            if [[ -z "$tab_id" ]]; then
+                log_debug "No herdr tab with label '$label' to close"
+                return 0
+            fi
+            if herdr tab close "$tab_id" >/dev/null 2>&1; then
+                log_info "Closed herdr tab '$label' ($tab_id)"
+            else
+                log_warn "Failed to close herdr tab '$label' ($tab_id)"
+            fi
+            return 0
+            ;;
+        none)
+            return 0
+            ;;
+    esac
 }
 
 # Get the current multiplexer's session label for display purposes.

@@ -230,6 +230,21 @@ start_service() {
                 tmux send-keys -t "${tmux_session}:${window_name}-${service_name}" "tail -n 200 -f '${log_file}'" Enter
             fi
             ;;
+        herdr)
+            # If layout mount stored a pane_id for this service, send the
+            # tail-f command into that pane so output is visible. Otherwise
+            # point the user at `wt logs`.
+            local _herdr_pane_id
+            _herdr_pane_id=$(get_service_state "$project" "$branch" "$service_name" "pane_id")
+            if [[ -n "$_herdr_pane_id" ]] && [[ "$_herdr_pane_id" != "null" ]] && command_exists herdr; then
+                herdr pane run "$_herdr_pane_id" "tail -n 200 -f '${log_file}'" >/dev/null 2>&1 \
+                    && log_info "Tailing log in herdr pane $_herdr_pane_id" \
+                    || log_warn "Failed to start tail in herdr pane $_herdr_pane_id"
+            else
+                log_info "Service '$service_name' running (PID $svc_pid). Tail logs with: wt logs $branch $service_name"
+            fi
+            log_debug "Log file: $log_file"
+            ;;
         *)
             log_info "Service '$service_name' running (PID $svc_pid). Tail logs with: wt logs $branch $service_name"
             log_debug "Log file: $log_file"

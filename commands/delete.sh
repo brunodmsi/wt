@@ -88,10 +88,10 @@ cmd_delete() {
         log_info "Removed log files"
     fi
 
-    # Kill tmux window
+    # Close the multiplexer's window/tab for this worktree
     local window_name
     window_name=$(get_session_name "$project" "$branch")
-    kill_session "$window_name" "$PROJECT_CONFIG_FILE"
+    multiplexer_close_tab "$window_name" "$PROJECT_CONFIG_FILE"
 
     # Run pre_delete hook if defined
     local wt_path

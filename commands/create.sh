@@ -146,8 +146,7 @@ cmd_create() {
     local active_mux
     active_mux=$(detect_multiplexer)
     log_info "Multiplexer: $active_mux"
-    multiplexer_warn_dropped_features "$PROJECT_CONFIG_FILE"
-    multiplexer_open_tab "$window_name" "$wt_path" "$PROJECT_CONFIG_FILE" "$no_attach"
+    multiplexer_open_tab "$window_name" "$wt_path" "$PROJECT_CONFIG_FILE" "$no_attach" "$project" "$branch"
     set_session_state "$project" "$branch" "$window_name"
 
     # Creation complete, disable cleanup trap
