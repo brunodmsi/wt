@@ -416,10 +416,47 @@ exit 0
 EOF
     chmod +x "$TEST_TMPDIR/bin/herdr"
 
-    PATH="$TEST_TMPDIR/bin:$PATH" run multiplexer_close_tab "ghost" "/tmp/cfg.yml"
+    PATH="$TEST_TMPDIR/bin:$PATH" run multiplexer_close_tab "ghost" "/tmp/cfg.yml" 2>&1
     [ "$status" -eq 0 ]
     log=$(cat "$HERDR_STUB_LOG")
     [[ "$log" != *"tab close"* ]]
+    # Miss should now surface as a visible WARN, not silent debug.
+    [[ "$output" == *"No herdr tab with label 'ghost' found"* ]]
+}
+
+@test "multiplexer_close_tab herdr falls back to unscoped lookup across workspaces" {
+    export WT_MULTIPLEXER="herdr"
+    # Simulate user running wt delete from a pane in a DIFFERENT workspace
+    # than where the tab lives.
+    export HERDR_ACTIVE_WORKSPACE_ID="w-other"
+    export HERDR_STUB_LOG="$TEST_TMPDIR/herdr.log"
+    : > "$HERDR_STUB_LOG"
+
+    mkdir -p "$TEST_TMPDIR/bin"
+    # Stub: scoped tab list (w-other) is empty; unscoped finds the tab.
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/bin/bash
+log="${HERDR_STUB_LOG:-/dev/null}"
+echo "HERDR_CALL: $*" >> "$log"
+case "$1 $2" in
+    "tab list")
+        if printf '%s\n' "$@" | grep -q -- "--workspace w-other"; then
+            echo '{"id":"req","result":{"type":"tab_list","tabs":[]}}'
+        else
+            echo '{"id":"req","result":{"type":"tab_list","tabs":[{"tab_id":"wA:5","label":"branch-x"}]}}'
+        fi
+        ;;
+    "tab close") echo '{}' ;;
+esac
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+
+    PATH="$TEST_TMPDIR/bin:$PATH" run multiplexer_close_tab "branch-x" "/tmp/cfg.yml"
+    [ "$status" -eq 0 ]
+    log=$(cat "$HERDR_STUB_LOG")
+    [[ "$log" == *"tab list --workspace w-other"* ]]
+    [[ "$log" == *"tab close wA:5"* ]]
 }
 
 @test "multiplexer_session_label returns 'herdr' for herdr" {

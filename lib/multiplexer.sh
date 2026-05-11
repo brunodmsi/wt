@@ -443,21 +443,32 @@ multiplexer_close_tab() {
             command_exists herdr || return 0
             command_exists jq || { log_warn "jq missing; cannot resolve herdr tab to close"; return 0; }
 
-            local tab_list_args=()
-            [[ -n "${HERDR_ACTIVE_WORKSPACE_ID:-}" ]] && tab_list_args+=(--workspace "$HERDR_ACTIVE_WORKSPACE_ID")
-
-            local tab_id
-            tab_id=$(herdr tab list ${tab_list_args[@]+"${tab_list_args[@]}"} 2>/dev/null \
-                | jq -r --arg L "$label" '.result.tabs[]? | select(.label == $L) | .tab_id' 2>/dev/null \
-                | head -1)
+            # First try scoped to the active workspace (handles label
+            # collisions across workspaces). If nothing matches, fall back
+            # to an unscoped lookup so we still close the tab when the
+            # delete is invoked from a pane in a different workspace.
+            local tab_id=""
+            if [[ -n "${HERDR_ACTIVE_WORKSPACE_ID:-}" ]]; then
+                tab_id=$(herdr tab list --workspace "$HERDR_ACTIVE_WORKSPACE_ID" 2>/dev/null \
+                    | jq -r --arg L "$label" '.result.tabs[]? | select(.label == $L) | .tab_id' 2>/dev/null \
+                    | head -1)
+            fi
             if [[ -z "$tab_id" ]]; then
-                log_debug "No herdr tab with label '$label' to close"
+                tab_id=$(herdr tab list 2>/dev/null \
+                    | jq -r --arg L "$label" '.result.tabs[]? | select(.label == $L) | .tab_id' 2>/dev/null \
+                    | head -1)
+            fi
+            if [[ -z "$tab_id" ]]; then
+                log_warn "No herdr tab with label '$label' found to close — leaving herdr untouched"
+                log_debug "Active workspace: ${HERDR_ACTIVE_WORKSPACE_ID:-<unset>}"
+                log_debug "tab list output: $(herdr tab list 2>&1)"
                 return 0
             fi
-            if herdr tab close "$tab_id" >/dev/null 2>&1; then
+            local close_out
+            if close_out=$(herdr tab close "$tab_id" 2>&1); then
                 log_info "Closed herdr tab '$label' ($tab_id)"
             else
-                log_warn "Failed to close herdr tab '$label' ($tab_id)"
+                log_warn "herdr tab close $tab_id failed: $close_out"
             fi
             return 0
             ;;
