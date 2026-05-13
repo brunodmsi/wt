@@ -237,6 +237,10 @@ start_service() {
             local _herdr_pane_id
             _herdr_pane_id=$(get_service_state "$project" "$branch" "$service_name" "pane_id")
             if [[ -n "$_herdr_pane_id" ]] && [[ "$_herdr_pane_id" != "null" ]] && command_exists herdr; then
+                # Kill any existing tail (or other foreground process) before
+                # queuing the new one. Mirrors the C-c the tmux branch does.
+                # Helper skips when we're inside the target pane ourselves.
+                herdr_pane_interrupt "$_herdr_pane_id"
                 herdr pane run "$_herdr_pane_id" "tail -n 200 -f '${log_file}'" >/dev/null 2>&1 \
                     && log_info "Tailing log in herdr pane $_herdr_pane_id" \
                     || log_warn "Failed to start tail in herdr pane $_herdr_pane_id"

@@ -517,6 +517,66 @@ EOF
     [[ "$log" == *"tab close wA:5"* ]]
 }
 
+@test "herdr_pane_interrupt sends C-c to target pane" {
+    export HERDR_STUB_LOG="$TEST_TMPDIR/herdr.log"
+    : > "$HERDR_STUB_LOG"
+    # Caller is not the target — focused pane lookup returns a different id.
+    unset HERDR_ACTIVE_PANE_ID
+
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/bin/bash
+log="${HERDR_STUB_LOG:-/dev/null}"
+echo "HERDR_CALL: $*" >> "$log"
+case "$1 $2" in
+    "pane list")
+        echo '{"id":"req","result":{"type":"pane_list","panes":[{"pane_id":"caller","focused":true}]}}'
+        ;;
+    "pane send-keys") echo '{}' ;;
+esac
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+
+    PATH="$TEST_TMPDIR/bin:$PATH" run herdr_pane_interrupt "service-pane"
+    [ "$status" -eq 0 ]
+    log=$(cat "$HERDR_STUB_LOG")
+    [[ "$log" == *"pane send-keys service-pane C-c"* ]]
+}
+
+@test "herdr_pane_interrupt skips when target is the focused pane" {
+    export HERDR_ACTIVE_PANE_ID="self"
+    export HERDR_STUB_LOG="$TEST_TMPDIR/herdr.log"
+    : > "$HERDR_STUB_LOG"
+
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/bin/bash
+log="${HERDR_STUB_LOG:-/dev/null}"
+echo "HERDR_CALL: $*" >> "$log"
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+
+    PATH="$TEST_TMPDIR/bin:$PATH" run herdr_pane_interrupt "self"
+    [ "$status" -eq 0 ]
+    log=$(cat "$HERDR_STUB_LOG")
+    [[ "$log" != *"send-keys"* ]]
+}
+
+@test "herdr_pane_interrupt is a no-op without a target pane" {
+    export HERDR_STUB_LOG="$TEST_TMPDIR/herdr.log"
+    : > "$HERDR_STUB_LOG"
+    mkdir -p "$TEST_TMPDIR/bin"
+    printf '#!/bin/bash\necho HERDR_CALL: $* >> "$HERDR_STUB_LOG"\nexit 0\n' > "$TEST_TMPDIR/bin/herdr"
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+
+    PATH="$TEST_TMPDIR/bin:$PATH" run herdr_pane_interrupt ""
+    [ "$status" -eq 0 ]
+    log=$(cat "$HERDR_STUB_LOG")
+    [ -z "$log" ]
+}
+
 @test "multiplexer_session_label returns 'herdr' for herdr" {
     export WT_MULTIPLEXER="herdr"
     run multiplexer_session_label "/tmp/cfg.yml"

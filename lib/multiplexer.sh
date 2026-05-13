@@ -280,6 +280,40 @@ herdr_configure_panes() {
     return 0
 }
 
+# Return the focused herdr pane id, or empty if we can't tell.
+# Prefers $HERDR_ACTIVE_PANE_ID (set in keybind-launched commands) and
+# falls back to a `herdr pane list` socket query for interactive shells.
+herdr_focused_pane_id() {
+    if [[ -n "${HERDR_ACTIVE_PANE_ID:-}" ]]; then
+        echo "$HERDR_ACTIVE_PANE_ID"
+        return 0
+    fi
+    command_exists herdr || return 0
+    command_exists jq || return 0
+    herdr pane list 2>/dev/null \
+        | jq -r '.result.panes[]? | select(.focused == true) | .pane_id' 2>/dev/null \
+        | head -1
+}
+
+# Send Ctrl-C to a herdr pane to kill whatever's running in the
+# foreground (e.g. an existing `tail -f`). No-op when target_pane is
+# empty, herdr CLI is missing, or target == focused pane (sending C-c
+# to ourselves would interrupt the wt command we're in).
+herdr_pane_interrupt() {
+    local target_pane="$1"
+    [[ -z "$target_pane" ]] && return 0
+    command_exists herdr || return 0
+
+    local current
+    current=$(herdr_focused_pane_id)
+    if [[ -n "$current" ]] && [[ "$current" == "$target_pane" ]]; then
+        log_debug "Skipping C-c to $target_pane — we're inside it"
+        return 0
+    fi
+
+    herdr pane send-keys "$target_pane" C-c >/dev/null 2>&1 || true
+}
+
 # Run each newline-separated command in a herdr pane via `herdr pane run`.
 # Args: pane_id commands_multiline
 # Returns 0 even when individual commands fail (warns instead) so a single
