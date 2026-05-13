@@ -446,6 +446,120 @@ tmux:
     kill "$stored_pid" 2>/dev/null || true
 }
 
+@test "start_service sends C-c then tail to the herdr service pane (restart path)" {
+    export WT_LOG_DIR="$TEST_TMPDIR/logs"
+    export WT_MULTIPLEXER="herdr"
+    # Caller not in the service pane.
+    unset HERDR_ACTIVE_PANE_ID
+
+    local repo="$TEST_TMPDIR/repo-restart"
+    git init "$repo" --initial-branch=main > /dev/null 2>&1 || git init "$repo" > /dev/null 2>&1
+    git -C "$repo" commit --allow-empty -m init > /dev/null 2>&1
+
+    create_worktree_state "restartp" "main" "$repo" 0
+
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<EOF
+#!/bin/bash
+echo "HERDR_CALL: \$*" >> "$TEST_TMPDIR/herdr.log"
+case "\$1 \$2" in
+    "pane list")
+        # Focused pane is a different id than the service pane.
+        echo '{"id":"req","result":{"type":"pane_list","panes":[{"pane_id":"caller","focused":true}]}}'
+        ;;
+    "pane send-keys"|"pane run") echo '{}' ;;
+esac
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+    : > "$TEST_TMPDIR/herdr.log"
+    export PATH="$TEST_TMPDIR/bin:$PATH"
+
+    set_service_state "restartp" "main" "api" "pane_id" "w1-9"
+
+    create_yaml_fixture "$TEST_TMPDIR/cfg-restart.yaml" "name: restartp
+repo_path: $repo
+ports:
+  reserved:
+    range: {min: 19300, max: 19305}
+    slots: 3
+    services:
+      api: 0
+services:
+  - name: api
+    command: sleep 60
+    port_key: api"
+
+    export PROJECT_CONFIG_FILE="$TEST_TMPDIR/cfg-restart.yaml"
+    claim_slot "restartp" "main" 3
+
+    start_service "restartp" "main" "api" "$TEST_TMPDIR/cfg-restart.yaml"
+
+    log=$(cat "$TEST_TMPDIR/herdr.log")
+    # C-c sent BEFORE the new tail
+    [[ "$log" == *"pane send-keys w1-9 C-c"* ]]
+    [[ "$log" == *"pane run w1-9 tail -n 200 -f "* ]]
+    # Order: send-keys first, then pane run
+    grep -n "send-keys w1-9 C-c" "$TEST_TMPDIR/herdr.log" >/dev/null
+    grep -n "pane run w1-9 tail" "$TEST_TMPDIR/herdr.log" >/dev/null
+
+    local stored_pid
+    stored_pid=$(get_service_state "restartp" "main" "api" "pid")
+    kill "$stored_pid" 2>/dev/null || true
+}
+
+@test "start_service skips C-c when caller is inside the service pane" {
+    export WT_LOG_DIR="$TEST_TMPDIR/logs"
+    export WT_MULTIPLEXER="herdr"
+    export HERDR_ACTIVE_PANE_ID="w1-9"   # caller == service pane
+
+    local repo="$TEST_TMPDIR/repo-restart2"
+    git init "$repo" --initial-branch=main > /dev/null 2>&1 || git init "$repo" > /dev/null 2>&1
+    git -C "$repo" commit --allow-empty -m init > /dev/null 2>&1
+
+    create_worktree_state "restartq" "main" "$repo" 0
+
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<EOF
+#!/bin/bash
+echo "HERDR_CALL: \$*" >> "$TEST_TMPDIR/herdr.log"
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+    : > "$TEST_TMPDIR/herdr.log"
+    export PATH="$TEST_TMPDIR/bin:$PATH"
+
+    set_service_state "restartq" "main" "api" "pane_id" "w1-9"
+
+    create_yaml_fixture "$TEST_TMPDIR/cfg-restart2.yaml" "name: restartq
+repo_path: $repo
+ports:
+  reserved:
+    range: {min: 19400, max: 19405}
+    slots: 3
+    services:
+      api: 0
+services:
+  - name: api
+    command: sleep 60
+    port_key: api"
+
+    export PROJECT_CONFIG_FILE="$TEST_TMPDIR/cfg-restart2.yaml"
+    claim_slot "restartq" "main" 3
+
+    start_service "restartq" "main" "api" "$TEST_TMPDIR/cfg-restart2.yaml"
+
+    log=$(cat "$TEST_TMPDIR/herdr.log")
+    # No C-c when we're in the target pane (avoid suiciding wt itself)
+    [[ "$log" != *"send-keys w1-9 C-c"* ]]
+    # New tail still goes out (queued behind wt's exit)
+    [[ "$log" == *"pane run w1-9 tail -n 200 -f "* ]]
+
+    local stored_pid
+    stored_pid=$(get_service_state "restartq" "main" "api" "pid")
+    kill "$stored_pid" 2>/dev/null || true
+}
+
 @test "start_service tails into stored herdr pane_id" {
     export WT_LOG_DIR="$TEST_TMPDIR/logs"
     export WT_MULTIPLEXER="herdr"
