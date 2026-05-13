@@ -425,8 +425,70 @@ multiplexer_warn_dropped_features() {
     return 0
 }
 
+# Close a herdr tab matching the given label. Returns 0 even on failure
+# (best-effort cleanup). Used by multiplexer_close_tab and as a fallback
+# even when the detected multiplexer isn't herdr — the user may have a
+# herdr session running that owns a tab for this worktree.
+#
+# Args: label [verbose=0]
+# verbose=1 surfaces "tab not found" as a WARN; verbose=0 stays silent
+# (used when this is a defensive cleanup from a non-herdr context).
+_herdr_close_tab_by_label() {
+    local label="$1"
+    local verbose="${2:-0}"
+    command_exists herdr || return 0
+    command_exists jq || return 0
+
+    # Fast probe: is herdr reachable? If `tab list` errors (no running
+    # server) bail silently so wt delete outside of herdr stays quiet.
+    local raw
+    if ! raw=$(herdr tab list 2>/dev/null); then
+        return 0
+    fi
+    if [[ -z "$raw" ]]; then
+        return 0
+    fi
+
+    # Prefer the active workspace scope when available (cross-workspace
+    # label collision safety), then fall back to unscoped match.
+    local tab_id=""
+    if [[ -n "${HERDR_ACTIVE_WORKSPACE_ID:-}" ]]; then
+        tab_id=$(herdr tab list --workspace "$HERDR_ACTIVE_WORKSPACE_ID" 2>/dev/null \
+            | jq -r --arg L "$label" '.result.tabs[]? | select(.label == $L) | .tab_id' 2>/dev/null \
+            | head -1)
+    fi
+    if [[ -z "$tab_id" ]]; then
+        tab_id=$(echo "$raw" \
+            | jq -r --arg L "$label" '.result.tabs[]? | select(.label == $L) | .tab_id' 2>/dev/null \
+            | head -1)
+    fi
+    if [[ -z "$tab_id" ]]; then
+        if [[ "$verbose" -eq 1 ]]; then
+            log_warn "No herdr tab with label '$label' found to close — leaving herdr untouched"
+            log_debug "Active workspace: ${HERDR_ACTIVE_WORKSPACE_ID:-<unset>}"
+            log_debug "tab list output: $raw"
+        else
+            log_debug "No herdr tab labeled '$label' found"
+        fi
+        return 0
+    fi
+    local close_out
+    if close_out=$(herdr tab close "$tab_id" 2>&1); then
+        log_info "Closed herdr tab '$label' ($tab_id)"
+    else
+        log_warn "herdr tab close $tab_id failed: $close_out"
+    fi
+    return 0
+}
+
 # Close the active multiplexer's window/tab for a given label. Used by
 # `wt delete` to clean up after a worktree.
+#
+# Always also tries to close a matching herdr tab, even when the active
+# multiplexer isn't herdr — `wt delete` is often run from a plain shell
+# (or tmux) while the herdr session that created the tab is still
+# running in the background. Without this, the herdr tab leaks.
+#
 # Args: label config_file
 multiplexer_close_tab() {
     local label="$1"
@@ -434,37 +496,23 @@ multiplexer_close_tab() {
     local mux
     mux=$(detect_multiplexer)
 
+    local verbose=0
     case "$mux" in
         tmux|dmux)
-            kill_session "$label" "$config_file"
-            return $?
+            kill_session "$label" "$config_file" || true
             ;;
         herdr)
-            command_exists herdr || return 0
-            command_exists jq || { log_warn "jq missing; cannot resolve herdr tab to close"; return 0; }
-
-            local tab_list_args=()
-            [[ -n "${HERDR_ACTIVE_WORKSPACE_ID:-}" ]] && tab_list_args+=(--workspace "$HERDR_ACTIVE_WORKSPACE_ID")
-
-            local tab_id
-            tab_id=$(herdr tab list ${tab_list_args[@]+"${tab_list_args[@]}"} 2>/dev/null \
-                | jq -r --arg L "$label" '.result.tabs[]? | select(.label == $L) | .tab_id' 2>/dev/null \
-                | head -1)
-            if [[ -z "$tab_id" ]]; then
-                log_debug "No herdr tab with label '$label' to close"
-                return 0
-            fi
-            if herdr tab close "$tab_id" >/dev/null 2>&1; then
-                log_info "Closed herdr tab '$label' ($tab_id)"
-            else
-                log_warn "Failed to close herdr tab '$label' ($tab_id)"
-            fi
-            return 0
+            verbose=1  # user is asking from inside herdr; warn on miss
             ;;
-        none)
-            return 0
-            ;;
+        none) ;;
     esac
+
+    # Best-effort herdr cleanup regardless of detected mux. No-op if
+    # herdr isn't installed or no session is running. Verbose only when
+    # herdr is the active mux so plain-shell `wt delete` stays quiet
+    # when there's nothing to clean.
+    _herdr_close_tab_by_label "$label" "$verbose"
+    return 0
 }
 
 # Get the current multiplexer's session label for display purposes.
