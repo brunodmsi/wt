@@ -577,6 +577,188 @@ EOF
     [ -z "$log" ]
 }
 
+@test "herdr_pane_in_tab returns 0 when pane is in expected tab" {
+    export HERDR_STUB_LOG="$TEST_TMPDIR/herdr.log"
+    : > "$HERDR_STUB_LOG"
+
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/bin/bash
+log="${HERDR_STUB_LOG:-/dev/null}"
+echo "HERDR_CALL: $*" >> "$log"
+case "$1 $2" in
+    "pane list")
+        echo '{"id":"req","result":{"type":"pane_list","panes":[{"pane_id":"p9","tab_id":"t3"}]}}'
+        ;;
+    "tab list")
+        echo '{"id":"req","result":{"type":"tab_list","tabs":[{"tab_id":"t3","label":"branch-x"}]}}'
+        ;;
+esac
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+
+    PATH="$TEST_TMPDIR/bin:$PATH" run herdr_pane_in_tab "p9" "branch-x"
+    [ "$status" -eq 0 ]
+}
+
+@test "herdr_pane_in_tab returns 1 when pane lives in a different tab" {
+    export HERDR_STUB_LOG="$TEST_TMPDIR/herdr.log"
+    : > "$HERDR_STUB_LOG"
+
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/bin/bash
+log="${HERDR_STUB_LOG:-/dev/null}"
+echo "HERDR_CALL: $*" >> "$log"
+case "$1 $2" in
+    "pane list")
+        # p9 actually lives in tab t9, not the expected t3.
+        echo '{"id":"req","result":{"type":"pane_list","panes":[{"pane_id":"p9","tab_id":"t9"}]}}'
+        ;;
+    "tab list")
+        echo '{"id":"req","result":{"type":"tab_list","tabs":[{"tab_id":"t9","label":"unrelated-tab"},{"tab_id":"t3","label":"branch-x"}]}}'
+        ;;
+esac
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+
+    PATH="$TEST_TMPDIR/bin:$PATH" run herdr_pane_in_tab "p9" "branch-x"
+    [ "$status" -eq 1 ]
+}
+
+@test "herdr_pane_in_tab returns 1 when pane no longer exists" {
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/bin/bash
+case "$1 $2" in
+    "pane list") echo '{"id":"req","result":{"type":"pane_list","panes":[]}}' ;;
+esac
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+
+    PATH="$TEST_TMPDIR/bin:$PATH" run herdr_pane_in_tab "ghost" "branch-x"
+    [ "$status" -eq 1 ]
+}
+
+@test "herdr_resolve_service_pane re-resolves pane_id from tab label and updates state" {
+    export HERDR_STUB_LOG="$TEST_TMPDIR/herdr.log"
+    : > "$HERDR_STUB_LOG"
+
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/bin/bash
+log="${HERDR_STUB_LOG:-/dev/null}"
+echo "HERDR_CALL: $*" >> "$log"
+case "$1 $2" in
+    "pane list")
+        # 4-pane services-top-2 tab in herdr's returned order:
+        # config[0]=top-left, config[1]=top-right, config[2]=bot-left, config[3]=bot-right
+        echo '{"id":"req","result":{"type":"pane_list","panes":[{"pane_id":"a1","tab_id":"t3"},{"pane_id":"a2","tab_id":"t3"},{"pane_id":"a3","tab_id":"t3"},{"pane_id":"a4","tab_id":"t3"}]}}'
+        ;;
+    "tab list")
+        echo '{"id":"req","result":{"type":"tab_list","tabs":[{"tab_id":"t3","label":"branch-x"}]}}'
+        ;;
+esac
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+
+    local cfg="$TEST_TMPDIR/cfg.yml"
+    create_yaml_fixture "$cfg" "tmux:
+  layout: services-top-2
+  windows:
+    - name: dev
+      panes:
+        - service: api
+        - service: web
+        - command: ''
+        - command: ''
+services:
+  - name: api
+  - name: web"
+
+    load_lib state
+    load_lib service
+
+    # web is at config index 1 -> should resolve to the second pane in tab t3 (a2).
+    PATH="$TEST_TMPDIR/bin:$PATH" run herdr_resolve_service_pane "p" "branch-x" "$cfg" "web" "branch-x"
+    [ "$status" -eq 0 ]
+    [ "$output" = "a2" ]
+
+    # State should now hold the fresh pane_id.
+    [[ "$(get_service_state p branch-x web pane_id)" == "a2" ]]
+}
+
+@test "herdr_resolve_service_pane returns failure when no tab matches label" {
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/bin/bash
+case "$1 $2" in
+    "tab list") echo '{"id":"req","result":{"type":"tab_list","tabs":[]}}' ;;
+esac
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+
+    local cfg="$TEST_TMPDIR/cfg.yml"
+    create_yaml_fixture "$cfg" "tmux:
+  windows:
+    - name: dev
+      panes:
+        - service: api
+services:
+  - name: api"
+
+    load_lib state
+    load_lib service
+
+    PATH="$TEST_TMPDIR/bin:$PATH" run herdr_resolve_service_pane "p" "branch-x" "$cfg" "api" "branch-x"
+    [ "$status" -ne 0 ]
+    [ -z "$output" ]
+}
+
+@test "herdr_resolve_service_pane refuses to heal when tab pane count != config" {
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/bin/bash
+case "$1 $2" in
+    "pane list")
+        # Only 2 panes — config expects 4.
+        echo '{"id":"req","result":{"type":"pane_list","panes":[{"pane_id":"x1","tab_id":"t3"},{"pane_id":"x2","tab_id":"t3"}]}}'
+        ;;
+    "tab list")
+        echo '{"id":"req","result":{"type":"tab_list","tabs":[{"tab_id":"t3","label":"branch-x"}]}}'
+        ;;
+esac
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+
+    local cfg="$TEST_TMPDIR/cfg.yml"
+    create_yaml_fixture "$cfg" "tmux:
+  layout: services-top-2
+  windows:
+    - name: dev
+      panes:
+        - service: api
+        - service: web
+        - command: ''
+        - command: ''
+services:
+  - name: api
+  - name: web"
+
+    load_lib state
+    load_lib service
+
+    PATH="$TEST_TMPDIR/bin:$PATH" run herdr_resolve_service_pane "p" "branch-x" "$cfg" "api" "branch-x"
+    [ "$status" -ne 0 ]
+    [ -z "$output" ]
+}
+
 @test "multiplexer_session_label returns 'herdr' for herdr" {
     export WT_MULTIPLEXER="herdr"
     run multiplexer_session_label "/tmp/cfg.yml"

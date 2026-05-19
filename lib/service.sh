@@ -234,8 +234,32 @@ start_service() {
             # If layout mount stored a pane_id for this service, send the
             # tail-f command into that pane so output is visible. Otherwise
             # point the user at `wt logs`.
-            local _herdr_pane_id
+            local _herdr_pane_id _herdr_expected_label
             _herdr_pane_id=$(get_service_state "$project" "$branch" "$service_name" "pane_id")
+            _herdr_expected_label=$(get_session_name "$project" "$branch")
+
+            # Validate the stored pane_id still lives in the expected tab.
+            # When tabs are closed manually, herdr can reassign the same
+            # pane_id to a NEW pane in a different tab — sending to a stale
+            # id then leaks the tail into the wrong tab. On mismatch, try to
+            # self-heal by re-resolving via the tab label + service index.
+            if [[ -n "$_herdr_pane_id" ]] && [[ "$_herdr_pane_id" != "null" ]] && command_exists herdr; then
+                if ! herdr_pane_in_tab "$_herdr_pane_id" "$_herdr_expected_label"; then
+                    log_warn "Stored pane_id $_herdr_pane_id is not in tab '$_herdr_expected_label' — attempting self-heal"
+                    # `|| true` so a self-heal failure under `set -e` doesn't
+                    # abort start_service; we handle the empty case below.
+                    local _healed
+                    _healed=$(herdr_resolve_service_pane "$project" "$branch" "$config_file" "$service_name" "$_herdr_expected_label" || true)
+                    if [[ -n "$_healed" ]]; then
+                        log_info "Re-resolved pane_id for $service_name: $_herdr_pane_id -> $_healed"
+                        _herdr_pane_id="$_healed"
+                    else
+                        log_warn "Could not re-resolve pane for '$service_name' in tab '$_herdr_expected_label' — skipping tail. Run 'wt attach $branch' to rebuild the tab."
+                        _herdr_pane_id=""
+                    fi
+                fi
+            fi
+
             if [[ -n "$_herdr_pane_id" ]] && [[ "$_herdr_pane_id" != "null" ]] && command_exists herdr; then
                 # Kill any existing tail (or other foreground process) before
                 # queuing the new one. Mirrors the C-c the tmux branch does.

@@ -464,8 +464,12 @@ tmux:
 echo "HERDR_CALL: \$*" >> "$TEST_TMPDIR/herdr.log"
 case "\$1 \$2" in
     "pane list")
-        # Focused pane is a different id than the service pane.
-        echo '{"id":"req","result":{"type":"pane_list","panes":[{"pane_id":"caller","focused":true}]}}'
+        # Both the service pane (w1-9) and the caller pane live in tab t1
+        # labeled "main" — matches start_service's expected label.
+        echo '{"id":"req","result":{"type":"pane_list","panes":[{"pane_id":"w1-9","tab_id":"t1","focused":false},{"pane_id":"caller","tab_id":"t1","focused":true}]}}'
+        ;;
+    "tab list")
+        echo '{"id":"req","result":{"type":"tab_list","tabs":[{"tab_id":"t1","label":"main"}]}}'
         ;;
     "pane send-keys"|"pane run") echo '{}' ;;
 esac
@@ -523,6 +527,14 @@ services:
     cat > "$TEST_TMPDIR/bin/herdr" <<EOF
 #!/bin/bash
 echo "HERDR_CALL: \$*" >> "$TEST_TMPDIR/herdr.log"
+case "\$1 \$2" in
+    "pane list")
+        echo '{"id":"req","result":{"type":"pane_list","panes":[{"pane_id":"w1-9","tab_id":"t1","focused":true}]}}'
+        ;;
+    "tab list")
+        echo '{"id":"req","result":{"type":"tab_list","tabs":[{"tab_id":"t1","label":"main"}]}}'
+        ;;
+esac
 exit 0
 EOF
     chmod +x "$TEST_TMPDIR/bin/herdr"
@@ -571,10 +583,20 @@ services:
     create_worktree_state "panep" "main" "$repo" 0
 
     # herdr stub: log every call so we can assert pane run for the tail.
+    # Stored pane (w1-7) lives in tab t1 labeled "main" — matches the
+    # expected session label so validation passes.
     mkdir -p "$TEST_TMPDIR/bin"
     cat > "$TEST_TMPDIR/bin/herdr" <<EOF
 #!/bin/bash
 echo "HERDR_CALL: \$*" >> "$TEST_TMPDIR/herdr.log"
+case "\$1 \$2" in
+    "pane list")
+        echo '{"id":"req","result":{"type":"pane_list","panes":[{"pane_id":"w1-7","tab_id":"t1","focused":false},{"pane_id":"caller","tab_id":"t1","focused":true}]}}'
+        ;;
+    "tab list")
+        echo '{"id":"req","result":{"type":"tab_list","tabs":[{"tab_id":"t1","label":"main"}]}}'
+        ;;
+esac
 exit 0
 EOF
     chmod +x "$TEST_TMPDIR/bin/herdr"
@@ -610,6 +632,156 @@ services:
     log=$(cat "$TEST_TMPDIR/herdr.log")
     [[ "$log" == *"pane run w1-7 tail -n 200 -f "* ]]
 
+    kill "$stored_pid" 2>/dev/null || true
+}
+
+@test "start_service self-heals when stored herdr pane_id is in a different tab" {
+    # Regression: when a herdr tab is closed and recreated manually, the
+    # state file's stored pane_id can refer to a pane that now lives in
+    # an unrelated tab. start_service must NOT send C-c / tail to that
+    # stale pane — it must re-resolve via the expected tab label.
+    export WT_LOG_DIR="$TEST_TMPDIR/logs"
+    export WT_MULTIPLEXER="herdr"
+    unset HERDR_ACTIVE_PANE_ID
+
+    local repo="$TEST_TMPDIR/repo-heal"
+    git init "$repo" --initial-branch=main > /dev/null 2>&1 || git init "$repo" > /dev/null 2>&1
+    git -C "$repo" commit --allow-empty -m init > /dev/null 2>&1
+
+    create_worktree_state "healp" "main" "$repo" 0
+
+    # 2-pane layout: api (index 0) + orchestrator command pane (index 1).
+    # Stale stored pane_id (stale-pane) lives in t-other; the "main" tab
+    # has 2 panes — fresh-pane (api position) and caller (orchestrator),
+    # matching the config pane count so self-heal accepts the tab.
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<EOF
+#!/bin/bash
+echo "HERDR_CALL: \$*" >> "$TEST_TMPDIR/herdr.log"
+case "\$1 \$2" in
+    "pane list")
+        echo '{"id":"req","result":{"type":"pane_list","panes":[{"pane_id":"stale-pane","tab_id":"t-other","focused":false},{"pane_id":"fresh-pane","tab_id":"t-main","focused":false},{"pane_id":"caller","tab_id":"t-main","focused":true}]}}'
+        ;;
+    "tab list")
+        echo '{"id":"req","result":{"type":"tab_list","tabs":[{"tab_id":"t-other","label":"unrelated-tab"},{"tab_id":"t-main","label":"main"}]}}'
+        ;;
+    "pane send-keys"|"pane run") echo '{}' ;;
+esac
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+    : > "$TEST_TMPDIR/herdr.log"
+    export PATH="$TEST_TMPDIR/bin:$PATH"
+
+    set_service_state "healp" "main" "api" "pane_id" "stale-pane"
+
+    create_yaml_fixture "$TEST_TMPDIR/cfg-heal.yaml" "name: healp
+repo_path: $repo
+ports:
+  reserved:
+    range: {min: 19500, max: 19505}
+    slots: 3
+    services:
+      api: 0
+services:
+  - name: api
+    command: sleep 60
+    port_key: api
+tmux:
+  windows:
+    - name: dev
+      panes:
+        - service: api
+        - command: ''"
+
+    export PROJECT_CONFIG_FILE="$TEST_TMPDIR/cfg-heal.yaml"
+    claim_slot "healp" "main" 3
+
+    start_service "healp" "main" "api" "$TEST_TMPDIR/cfg-heal.yaml"
+
+    log=$(cat "$TEST_TMPDIR/herdr.log")
+    # MUST NOT send to the stale pane.
+    [[ "$log" != *"pane send-keys stale-pane"* ]]
+    [[ "$log" != *"pane run stale-pane"* ]]
+    # MUST send to the freshly-resolved pane.
+    [[ "$log" == *"pane send-keys fresh-pane C-c"* ]]
+    [[ "$log" == *"pane run fresh-pane tail -n 200 -f "* ]]
+    # State must be updated to the new pane_id.
+    [[ "$(get_service_state healp main api pane_id)" == "fresh-pane" ]]
+
+    local stored_pid
+    stored_pid=$(get_service_state "healp" "main" "api" "pid")
+    kill "$stored_pid" 2>/dev/null || true
+}
+
+@test "start_service skips tail when stale pane_id and no matching tab" {
+    # When the stored pane_id is stale AND there's no tab with the expected
+    # label to self-heal from, start_service must skip the tail entirely
+    # (not send to the stale pane) and log a hint.
+    export WT_LOG_DIR="$TEST_TMPDIR/logs"
+    export WT_MULTIPLEXER="herdr"
+    unset HERDR_ACTIVE_PANE_ID
+
+    local repo="$TEST_TMPDIR/repo-noheal"
+    git init "$repo" --initial-branch=main > /dev/null 2>&1 || git init "$repo" > /dev/null 2>&1
+    git -C "$repo" commit --allow-empty -m init > /dev/null 2>&1
+
+    create_worktree_state "nohealp" "main" "$repo" 0
+
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<EOF
+#!/bin/bash
+echo "HERDR_CALL: \$*" >> "$TEST_TMPDIR/herdr.log"
+case "\$1 \$2" in
+    "pane list")
+        # Stale pane lives in t-other; no tab labeled "main" exists.
+        echo '{"id":"req","result":{"type":"pane_list","panes":[{"pane_id":"stale-pane","tab_id":"t-other"}]}}'
+        ;;
+    "tab list")
+        echo '{"id":"req","result":{"type":"tab_list","tabs":[{"tab_id":"t-other","label":"unrelated-tab"}]}}'
+        ;;
+    "pane send-keys"|"pane run") echo '{}' ;;
+esac
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+    : > "$TEST_TMPDIR/herdr.log"
+    export PATH="$TEST_TMPDIR/bin:$PATH"
+
+    set_service_state "nohealp" "main" "api" "pane_id" "stale-pane"
+
+    create_yaml_fixture "$TEST_TMPDIR/cfg-noheal.yaml" "name: nohealp
+repo_path: $repo
+ports:
+  reserved:
+    range: {min: 19600, max: 19605}
+    slots: 3
+    services:
+      api: 0
+services:
+  - name: api
+    command: sleep 60
+    port_key: api
+tmux:
+  windows:
+    - name: dev
+      panes:
+        - service: api"
+
+    export PROJECT_CONFIG_FILE="$TEST_TMPDIR/cfg-noheal.yaml"
+    claim_slot "nohealp" "main" 3
+
+    start_service "nohealp" "main" "api" "$TEST_TMPDIR/cfg-noheal.yaml"
+
+    log=$(cat "$TEST_TMPDIR/herdr.log")
+    # No send-keys / pane run to the stale pane (the bug).
+    [[ "$log" != *"pane send-keys stale-pane"* ]]
+    [[ "$log" != *"pane run stale-pane"* ]]
+    # No pane run at all — nothing to heal to.
+    [[ "$log" != *"pane run "*"tail -n 200 -f"* ]]
+
+    local stored_pid
+    stored_pid=$(get_service_state "nohealp" "main" "api" "pid")
     kill "$stored_pid" 2>/dev/null || true
 }
 

@@ -109,6 +109,120 @@ herdr_get_pane_for_tab() {
         | head -1
 }
 
+# Return all pane_ids in a herdr tab as a newline-separated list, in the
+# order `herdr pane list` returns them (empirically: config-layout order —
+# same order produced by herdr_build_layout).
+# Args: tab_id
+herdr_panes_for_tab() {
+    local tab_id="$1"
+    [[ -z "$tab_id" ]] && return 1
+    command_exists herdr || return 1
+    command_exists jq    || return 1
+    herdr pane list 2>/dev/null \
+        | jq -r --arg T "$tab_id" '.result.panes[]? | select(.tab_id == $T) | .pane_id' 2>/dev/null
+}
+
+# Resolve a tab_id by label, scoped to the active workspace when known.
+# Args: label
+# Output: tab_id or empty
+herdr_tab_id_for_label() {
+    local label="$1"
+    [[ -z "$label" ]] && return 1
+    command_exists herdr || return 1
+    command_exists jq    || return 1
+
+    local tab_id=""
+    if [[ -n "${HERDR_ACTIVE_WORKSPACE_ID:-}" ]]; then
+        tab_id=$(herdr tab list --workspace "$HERDR_ACTIVE_WORKSPACE_ID" 2>/dev/null \
+            | jq -r --arg L "$label" '.result.tabs[]? | select(.label == $L) | .tab_id' 2>/dev/null \
+            | head -1)
+    fi
+    if [[ -z "$tab_id" ]]; then
+        tab_id=$(herdr tab list 2>/dev/null \
+            | jq -r --arg L "$label" '.result.tabs[]? | select(.label == $L) | .tab_id' 2>/dev/null \
+            | head -1)
+    fi
+    echo "$tab_id"
+}
+
+# Check whether a pane_id currently lives in a tab whose label matches
+# expected_label. Returns 0 (true) on match, 1 otherwise.
+# Used to detect when a stored pane_id has become stale (e.g. the original
+# tab was closed and herdr reassigned the id to a pane in a different tab).
+# Args: pane_id expected_label
+herdr_pane_in_tab() {
+    local pane_id="$1"
+    local expected_label="$2"
+    [[ -z "$pane_id" ]] && return 1
+    [[ -z "$expected_label" ]] && return 1
+    command_exists herdr || return 1
+    command_exists jq    || return 1
+
+    local pane_tab_id
+    pane_tab_id=$(herdr pane list 2>/dev/null \
+        | jq -r --arg P "$pane_id" '.result.panes[]? | select(.pane_id == $P) | .tab_id' 2>/dev/null \
+        | head -1)
+    [[ -z "$pane_tab_id" ]] && return 1
+
+    local actual_label
+    actual_label=$(herdr tab list 2>/dev/null \
+        | jq -r --arg T "$pane_tab_id" '.result.tabs[]? | select(.tab_id == $T) | .label' 2>/dev/null \
+        | head -1)
+
+    [[ "$actual_label" == "$expected_label" ]]
+}
+
+# Re-resolve a service's pane_id by tab label + the service's index in the
+# project's pane config. Used to self-heal stored pane_ids that have become
+# stale (e.g. herdr reassigned them to a different tab after a manual close).
+#
+# Looks up the tab by label, fetches its panes in layout order, picks the
+# pane at the service's config index. On success, updates state with the
+# fresh pane_id and echoes it. On failure (no tab, pane count mismatch),
+# returns non-zero and echoes nothing.
+#
+# Args: project branch config_file service_name expected_label
+herdr_resolve_service_pane() {
+    local project="$1"
+    local branch="$2"
+    local config_file="$3"
+    local service_name="$4"
+    local expected_label="$5"
+
+    [[ -z "$expected_label" ]] && return 1
+    command_exists herdr || return 1
+    command_exists jq    || return 1
+
+    local svc_idx
+    svc_idx=$(find_service_pane_index "$config_file" "$service_name") || return 1
+    [[ -z "$svc_idx" ]] && return 1
+
+    local tab_id
+    tab_id=$(herdr_tab_id_for_label "$expected_label")
+    [[ -z "$tab_id" ]] && return 1
+
+    local panes_list
+    panes_list=$(herdr_panes_for_tab "$tab_id")
+    [[ -z "$panes_list" ]] && return 1
+
+    # Refuse to guess when the tab's pane count doesn't match the layout
+    # the service config expects — likely user-modified.
+    local config_pane_count actual_pane_count
+    config_pane_count=$(yq '[.tmux.windows[0].panes[]?] | length' "$config_file" 2>/dev/null || echo 0)
+    [[ "$config_pane_count" == "null" ]] && config_pane_count=0
+    actual_pane_count=$(echo "$panes_list" | grep -c .)
+    if [[ "$actual_pane_count" -ne "$config_pane_count" ]]; then
+        return 1
+    fi
+
+    local resolved
+    resolved=$(echo "$panes_list" | awk -v n="$svc_idx" 'NR==n+1{print; exit}')
+    [[ -z "$resolved" ]] && return 1
+
+    set_service_state "$project" "$branch" "$service_name" "pane_id" "$resolved"
+    echo "$resolved"
+}
+
 # Split a herdr pane and return the new pane_id.
 # Args: target_pane_id direction [cwd]
 # direction: "right" or "down"
