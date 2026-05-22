@@ -98,7 +98,7 @@ cmd_stop() {
 }
 
 show_stop_help() {
-    cat << 'EOF'
+    cat << 'EOF' | _wt_sub
 Usage: wt stop [service...] [options]
        wt stop <branch> [service...] [options]
        wt stop --all [options]

@@ -246,12 +246,12 @@ validate_setup_config() {
 
         if [[ -z "$name" ]] || [[ "$name" == "null" ]]; then
             log_error "Setup step $i: missing 'name'"
-            ((errors++))
+            errors=$((errors + 1))
         fi
 
         if [[ -z "$cmd" ]] || [[ "$cmd" == "null" ]]; then
             log_error "Setup step $i ($name): missing 'command'"
-            ((errors++))
+            errors=$((errors + 1))
         fi
 
         # Check dependencies exist
@@ -271,7 +271,7 @@ validate_setup_config() {
             done
             if [[ "$found" == "false" ]]; then
                 log_error "Setup step '$name': dependency '$dep' not found or defined after this step"
-                ((errors++))
+                errors=$((errors + 1))
             fi
         done <<< "$deps"
     done

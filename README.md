@@ -21,6 +21,8 @@ When working on multiple features/branches simultaneously, constantly switching 
 
 ## Installation
 
+### macOS / Linux
+
 ```bash
 # Install dependencies
 brew install yq tmux
@@ -30,6 +32,55 @@ brew install yq tmux
 
 # Restart shell or source completions
 source ~/.zshrc  # or ~/.bashrc
+```
+
+### Windows (Git Bash / PowerShell) — the command is `gwt`
+
+The tool runs natively in **Git Bash** (the MSYS2 environment bundled with
+[Git for Windows](https://gitforwindows.org/)) and from **PowerShell**.
+Worktree management — `init`, `create`, `delete`, `list`, `status`, `ports`,
+`exec`, `run`, `config`, `doctor` — works without any extra setup.
+
+> **On Windows the command is `gwt`, not `wt`.** `wt` is already taken by
+> **Windows Terminal** (`wt.exe`), so typing `wt create …` would launch
+> Windows Terminal, not this tool. The installer therefore installs the
+> command as **`gwt`** and sets `WT_CMD=gwt` so all help and error text refers
+> to `gwt`. (You can choose any name — set `WT_CMD` to match.)
+
+> **tmux is not bundled with Git for Windows.** The service/session commands
+> (`start`, `stop`, `restart`, `attach`, `send`, `logs`, `panes`) require a
+> terminal multiplexer. The Windows launchers default to `WT_MULTIPLEXER=none`,
+> so worktree management works and those commands no-op. Native Windows tmux
+> ports such as **psmux** are *not* sufficient — they run **PowerShell** panes
+> and can't host the interactive bash that `wt` types commands into (you'll see
+> errors like `0x80070002 … cannot find the file`). For the **full multiplexer
+> workflow, use [WSL2](https://learn.microsoft.com/windows/wsl/)**, where real
+> tmux + bash run exactly as on Linux.
+
+```bash
+# 1. Install the one required dependency (yq). Pick one:
+winget install MikeFarah.yq
+#   scoop install yq
+#   choco install yq
+
+# 2. From a Git Bash shell, in the cloned repo:
+./install.sh
+```
+
+The installer detects Windows and, instead of a symlink (which needs elevated
+privileges), writes two launchers into your install dir (`~/bin` by default),
+both defaulting to `WT_MULTIPLEXER=none` and `WT_CMD=gwt`:
+
+- `gwt`      — a Bash wrapper, used from **Git Bash**
+- `gwt.cmd`  — a shim so `gwt` also works from **PowerShell / cmd.exe**
+
+Make sure the install dir is on your `PATH`. Then, from PowerShell or Git Bash:
+
+```powershell
+cd C:\path\to\your-repo
+gwt init
+gwt create feature/my-feature --from main
+gwt list
 ```
 
 ## Quick Start

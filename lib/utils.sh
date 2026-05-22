@@ -12,26 +12,42 @@ BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m' # No Color
 
+# Command name shown in help text and messages. Defaults to "wt"; launchers
+# can export WT_CMD=gwt on Windows, where "wt" is taken by Windows Terminal.
+WT_CMD="${WT_CMD:-wt}"
+export WT_CMD
+
+# Filter that rewrites the bare command token "wt " in stdin to "$WT_CMD ".
+# A no-op (plain passthrough) when WT_CMD is the default "wt", so behavior on
+# macOS/Linux is unchanged. Help blocks and log output are piped through this.
+_wt_sub() {
+    if [[ "$WT_CMD" == "wt" ]]; then
+        cat
+    else
+        sed "s/wt /$WT_CMD /g"
+    fi
+}
+
 # Logging functions - all output to stderr to not interfere with function return values
 log_info() {
-    echo -e "${BLUE}[INFO]${NC} $*" >&2
+    echo -e "${BLUE}[INFO]${NC} $*" | _wt_sub >&2
 }
 
 log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $*" >&2
+    echo -e "${GREEN}[SUCCESS]${NC} $*" | _wt_sub >&2
 }
 
 log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $*" >&2
+    echo -e "${YELLOW}[WARN]${NC} $*" | _wt_sub >&2
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $*" >&2
+    echo -e "${RED}[ERROR]${NC} $*" | _wt_sub >&2
 }
 
 log_debug() {
     if [[ "${WT_DEBUG:-}" == "1" ]]; then
-        echo -e "${DIM}[DEBUG]${NC} $*" >&2
+        echo -e "${DIM}[DEBUG]${NC} $*" | _wt_sub >&2
     fi
 }
 
@@ -66,6 +82,51 @@ die() {
 # Check if command exists
 command_exists() {
     command -v "$1" &>/dev/null
+}
+
+# Detect the host OS family: macos | windows | linux
+# "windows" covers the POSIX layers wt runs under on Windows
+# (Git Bash / MSYS2 / Cygwin).
+wt_os() {
+    case "$(uname -s 2>/dev/null)" in
+        Darwin*) echo "macos" ;;
+        MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
+        *) echo "linux" ;;
+    esac
+}
+
+# Return 0 when running under a Windows POSIX layer.
+is_windows() {
+    [[ "$(wt_os)" == "windows" ]]
+}
+
+# Suggest an OS-appropriate install command for a dependency.
+dep_hint() {
+    local tool="$1"
+    case "$(wt_os)" in
+        macos)
+            case "$tool" in
+                envsubst) echo "brew install gettext" ;;
+                *) echo "brew install $tool" ;;
+            esac
+            ;;
+        windows)
+            case "$tool" in
+                yq) echo "winget install MikeFarah.yq (or: scoop install yq / choco install yq)" ;;
+                jq) echo "winget install jqlang.jq (or: scoop install jq)" ;;
+                tmux) echo "optional; use WSL for full service/session features (psmux runs PowerShell panes and can't host wt's bash orchestration)" ;;
+                envsubst) echo "ships with Git for Windows / MSYS2 (gettext)" ;;
+                *) echo "winget install $tool (or: scoop install $tool)" ;;
+            esac
+            ;;
+        *)
+            case "$tool" in
+                yq) echo "see https://github.com/mikefarah/yq#install" ;;
+                envsubst) echo "install gettext (e.g. apt install gettext-base)" ;;
+                *) echo "install $tool via your package manager (apt/dnf/pacman)" ;;
+            esac
+            ;;
+    esac
 }
 
 # Require a command or die
@@ -182,10 +243,21 @@ with_file_lock() {
     return $rc
 }
 
-# Check if port is in use
+# Check if port is in use (portable across macOS / Linux / Windows Git Bash)
 port_in_use() {
     local port="$1"
-    lsof -i ":$port" &>/dev/null
+    if command_exists lsof; then
+        lsof -i ":$port" &>/dev/null
+    elif command_exists ss; then
+        ss -ltnH 2>/dev/null | grep -Eq "[:.]${port}[[:space:]]"
+    elif command_exists netstat; then
+        # Matches both BSD/Linux netstat and Windows netstat (Git Bash):
+        # a local address ending in :PORT that is in a listening state.
+        netstat -an 2>/dev/null | grep -E "[:.]${port}[[:space:]]" | grep -Eiq 'listen'
+    else
+        # No tool available to check — assume the port is free.
+        return 1
+    fi
 }
 
 # Pretty print a key-value pair

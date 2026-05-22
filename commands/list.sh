@@ -127,7 +127,7 @@ list_worktrees_pretty() {
                 "$(truncate "$path" 38)"
         fi
 
-        ((count++))
+        count=$((count + 1))
     done <<< "$all_worktrees"
 
     echo ""
@@ -205,18 +205,18 @@ list_all_projects() {
             "$repo_path" \
             "$wt_count"
 
-        ((count++))
+        count=$((count + 1))
     done
 
     if [[ "$count" -eq 0 ]]; then
-        echo "  No projects configured. Run 'wt init' in a git repository."
+        echo "  No projects configured. Run '${WT_CMD} init' in a git repository."
     fi
 
     echo ""
 }
 
 show_list_help() {
-    cat << 'EOF'
+    cat << 'EOF' | _wt_sub
 Usage: wt list [options]
 
 List all worktrees for the current or specified project.

@@ -34,17 +34,17 @@ cmd_doctor() {
     done
 
     echo ""
-    echo -e "${BOLD}wt doctor${NC}"
+    echo -e "${BOLD}${WT_CMD} doctor${NC}"
     echo "$(printf '%.0s-' {1..50})"
     echo ""
 
     # --- 1. Dependencies ---
     echo -e "${BOLD}Dependencies${NC}"
 
-    _doctor_check_cmd "git" "brew install git"
-    _doctor_check_cmd "yq" "brew install yq"
-    _doctor_check_cmd "tmux" "brew install tmux"
-    _doctor_check_cmd "envsubst" "brew install gettext"
+    _doctor_check_cmd "git" "$(dep_hint git)"
+    _doctor_check_cmd "yq" "$(dep_hint yq)"
+    _doctor_check_cmd "tmux" "$(dep_hint tmux)" optional
+    _doctor_check_cmd "envsubst" "$(dep_hint envsubst)" optional
 
     echo ""
 
@@ -173,7 +173,7 @@ cmd_doctor() {
                 wt_path=$(yaml_get "$state_f" ".worktrees.\"$sanitized_branch\".path" "")
                 if [[ -n "$wt_path" ]] && [[ ! -d "$wt_path" ]]; then
                     _doctor_warn "Orphaned worktree state: $sanitized_branch (path $wt_path missing)"
-                    ((orphaned++))
+                    orphaned=$((orphaned + 1))
                 fi
             done < <(list_worktree_states "$project")
 
@@ -194,7 +194,7 @@ cmd_doctor() {
                     if [[ "$svc_status" == "running" ]] && [[ -n "$svc_pid" ]] && [[ "$svc_pid" != "null" ]]; then
                         if ! kill -0 "$svc_pid" 2>/dev/null; then
                             _doctor_warn "Stale PID for $svc_name in $branch_name: PID $svc_pid not running"
-                            ((stale_pids++))
+                            stale_pids=$((stale_pids + 1))
                         fi
                     fi
                 done < <(list_service_states "$project" "$branch_name")
@@ -237,7 +237,7 @@ cmd_doctor() {
                 fi
             fi
         else
-            _doctor_fail "tmux is not installed"
+            _doctor_warn "tmux not installed — skipping session checks (service orchestration unavailable; $(dep_hint tmux))"
         fi
 
         echo ""
@@ -268,7 +268,7 @@ cmd_doctor() {
 
                     if echo "$all_ports" | grep -q ":${effective_port}$"; then
                         _doctor_fail "Duplicate port $effective_port: $svc_name ($branch_name) conflicts with another service"
-                        ((duplicate_ports++))
+                        duplicate_ports=$((duplicate_ports + 1))
                     fi
                     all_ports="$all_ports
 $svc_name@$sanitized_branch:$effective_port"
@@ -311,6 +311,7 @@ _doctor_warn() {
 _doctor_check_cmd() {
     local cmd="$1"
     local install_hint="$2"
+    local optional="${3:-}"
 
     if command_exists "$cmd"; then
         local version=""
@@ -321,13 +322,15 @@ _doctor_check_cmd() {
             envsubst) version="available" ;;
         esac
         _doctor_pass "$cmd ($version)"
+    elif [[ "$optional" == "optional" ]]; then
+        _doctor_warn "$cmd not found — optional ($install_hint)"
     else
         _doctor_fail "$cmd not found (install: $install_hint)"
     fi
 }
 
 show_doctor_help() {
-    cat << 'EOF'
+    cat << 'EOF' | _wt_sub
 Usage: wt doctor [options]
 
 Run diagnostic checks on your wt setup and project configuration.

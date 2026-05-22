@@ -42,6 +42,29 @@ docs/              # configuration.md reference
 - **macOS bash 3.2**: No namerefs (`declare -n`), no `${var//[^pattern]/}`. Stick to POSIX-compatible constructs.
 - Use `sed`, `awk`, `tr`, `cksum` — no GNU-only flags.
 - `yq` is mikefarah v4 — use `strenv()` for safe YAML string injection.
+- **Windows (Git Bash / MSYS2)**: worktree management runs natively. tmux isn't
+  bundled with Git for Windows, so when it's absent `start`/`stop`/`attach`/
+  `send`/`logs`/`panes` degrade to the `none` multiplexer. Keep tmux strictly
+  optional and never `exit` on a missing tmux. Note: native Windows tmux ports
+  like `psmux` are auto-detected but unusable for orchestration — they run
+  PowerShell panes and can't host an interactive bash, while wt's pane commands
+  are bash. For the full multiplexer workflow on Windows, use WSL2.
+- **Command name (`$WT_CMD`)**: user-facing text must reference `$WT_CMD` (set in
+  lib/utils.sh, default `wt`), never a hard-coded `wt`. On Windows `wt` is taken
+  by Windows Terminal, so the launcher installs as `gwt` and exports `WT_CMD=gwt`.
+  `log_*`/`die` output and `cat << 'EOF' | _wt_sub` help blocks are filtered
+  automatically; plain `echo` lines that mention the command must use `${WT_CMD}`. Use `wt_os`/`is_windows`/`dep_hint` (lib/utils.sh) for OS-aware
+  behavior. Don't assume Unix-only tools — `lsof` is absent (port_in_use falls
+  back to `ss`/`netstat`); symlinks need privileges (install.sh writes wrapper
+  scripts on Windows).
+- **`set -e` gotchas** (wt.sh runs `set -euo pipefail`, but tests don't):
+  - `((x++))` returns status 1 when `x` is 0 → trips `set -e`. Use
+    `x=$((x + 1))`.
+  - `var=$(cmd | grep ...)` where `grep` may not match exits non-zero → trips
+    `set -e`. Append `|| true`.
+  - Because the bats suites source modules without `set -e`, exit-code
+    regressions must be tested by driving `wt.sh` as a subprocess (see
+    `tests/test_windows.bats`).
 
 ## Testing
 

@@ -49,7 +49,7 @@ source "${WT_SCRIPT_DIR}/commands/doctor.sh"
 
 # Show help
 show_help() {
-    echo -e "${BOLD}wt${NC} - Git Worktree Manager v${VERSION}
+    echo -e "${BOLD}${WT_CMD}${NC} - Git Worktree Manager v${VERSION}
 
 ${BOLD}USAGE${NC}
     wt <command> [arguments] [options]
@@ -113,12 +113,12 @@ ${BOLD}CONFIGURATION${NC}
 
 For more information on a command, run:
     wt <command> --help
-"
+" | _wt_sub
 }
 
 # Show version
 show_version() {
-    echo "wt version $VERSION"
+    echo "$WT_CMD version $VERSION"
 }
 
 # Check dependencies
@@ -126,15 +126,11 @@ check_dependencies() {
     local missing=()
 
     if ! command_exists git; then
-        missing+=("git")
+        missing+=("git ($(dep_hint git))")
     fi
 
     if ! command_exists yq; then
-        missing+=("yq (install: brew install yq)")
-    fi
-
-    if ! command_exists tmux; then
-        missing+=("tmux (install: brew install tmux)")
+        missing+=("yq ($(dep_hint yq))")
     fi
 
     if [[ ${#missing[@]} -gt 0 ]]; then
@@ -143,6 +139,13 @@ check_dependencies() {
             echo "  - $dep"
         done
         exit 1
+    fi
+
+    # tmux is optional: worktree management works without it. Service and
+    # session commands (start/stop/restart/attach/send/logs/panes) need a
+    # terminal multiplexer, which is unavailable natively on Windows.
+    if ! command_exists tmux && [[ -z "${WT_MULTIPLEXER:-}" ]]; then
+        log_debug "tmux not found — service/session commands are unavailable ($(dep_hint tmux))"
     fi
 }
 
@@ -231,7 +234,7 @@ main() {
         *)
             log_error "Unknown command: $command"
             echo ""
-            echo "Run 'wt --help' for usage information."
+            echo "Run '$WT_CMD --help' for usage information."
             exit 1
             ;;
     esac

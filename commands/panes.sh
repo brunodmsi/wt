@@ -113,7 +113,7 @@ cmd_panes() {
 }
 
 show_panes_help() {
-    cat << 'EOF'
+    cat << 'EOF' | _wt_sub
 Usage: wt panes [branch] [options]
        wt panes [options]  (inside worktree)
 

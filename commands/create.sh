@@ -176,12 +176,12 @@ cmd_create() {
     fi
     echo ""
     echo "Next steps:"
-    echo "  wt start $branch --all    # Start all services"
-    echo "  wt attach $branch         # Attach to tmux"
+    echo "  ${WT_CMD} start $branch --all    # Start all services"
+    echo "  ${WT_CMD} attach $branch         # Attach to tmux"
 }
 
 show_create_help() {
-    cat << 'EOF'
+    cat << 'EOF' | _wt_sub
 Usage: wt create <branch> [options]
 
 Create a new worktree for the specified branch.

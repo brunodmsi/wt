@@ -123,7 +123,7 @@ cmd_restart() {
 }
 
 show_restart_help() {
-    cat << 'EOF'
+    cat << 'EOF' | _wt_sub
 Usage: wt restart [service...] [options]
        wt restart <branch> [service...] [options]
        wt restart --all [options]

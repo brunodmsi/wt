@@ -29,35 +29,60 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $*"
 }
 
+# Detect the host OS family: macos | windows | linux
+os_family() {
+    case "$(uname -s 2>/dev/null)" in
+        Darwin*) echo "macos" ;;
+        MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
+        *) echo "linux" ;;
+    esac
+}
+
+# Suggest an OS-appropriate install command for a dependency.
+dep_install_hint() {
+    local tool="$1"
+    case "$(os_family)" in
+        macos) echo "brew install $tool" ;;
+        windows)
+            case "$tool" in
+                yq) echo "winget install MikeFarah.yq (or: scoop install yq)" ;;
+                tmux) echo "optional; use WSL for service/session features" ;;
+                *) echo "winget install $tool (or: scoop install $tool)" ;;
+            esac
+            ;;
+        *) echo "install $tool via your package manager (apt/dnf/pacman)" ;;
+    esac
+}
+
 # Check dependencies
 check_dependencies() {
     local missing=()
+    local optional_missing=()
 
-    if ! command -v git &>/dev/null; then
-        missing+=("git")
-    fi
-
-    if ! command -v yq &>/dev/null; then
-        missing+=("yq")
-    fi
-
-    if ! command -v tmux &>/dev/null; then
-        missing+=("tmux")
-    fi
+    command -v git &>/dev/null || missing+=("git")
+    command -v yq &>/dev/null || missing+=("yq")
+    # tmux is optional: worktree management works without it. Service/session
+    # commands need it, and it has no native Windows build.
+    command -v tmux &>/dev/null || optional_missing+=("tmux")
 
     if [[ ${#missing[@]} -gt 0 ]]; then
-        log_warn "Missing dependencies:"
+        log_warn "Missing required dependencies:"
         for dep in "${missing[@]}"; do
-            echo "  - $dep"
+            echo "  - $dep ($(dep_install_hint "$dep"))"
         done
-        echo ""
-        echo "Install with:"
-        echo "  brew install ${missing[*]}"
         echo ""
         read -r -p "Continue anyway? [y/N] " response
         if [[ ! "$response" =~ ^[Yy]$ ]]; then
             exit 1
         fi
+    fi
+
+    if [[ ${#optional_missing[@]} -gt 0 ]]; then
+        echo ""
+        log_warn "Missing optional dependencies (service/session features only):"
+        for dep in "${optional_missing[@]}"; do
+            echo "  - $dep ($(dep_install_hint "$dep"))"
+        done
     fi
 }
 
@@ -70,10 +95,16 @@ make_executable() {
     chmod +x "$SCRIPT_DIR/commands/"*.sh 2>/dev/null || true
 }
 
-# Create symlink
-create_symlink() {
+# Install the launcher into target_dir.
+# On macOS/Linux this is a symlink named "wt". On Windows the command is
+# installed as "gwt" instead, because "wt" is taken by Windows Terminal
+# (wt.exe); symlinks also need elevated privileges, so we write small launcher
+# scripts. The Windows launchers default WT_MULTIPLEXER=none (no usable tmux)
+# and WT_CMD=gwt (so help/error text shows the right command name):
+#   - "gwt"     : a bash wrapper (used from Git Bash / MSYS2)
+#   - "gwt.cmd" : a shim so "gwt" also works from PowerShell / cmd.exe
+create_launcher() {
     local target_dir="${1:-$HOME/bin}"
-    local symlink="$target_dir/wt"
 
     # Create target directory if needed
     if [[ ! -d "$target_dir" ]]; then
@@ -81,23 +112,71 @@ create_symlink() {
         mkdir -p "$target_dir"
     fi
 
-    # Remove existing symlink
-    if [[ -L "$symlink" ]]; then
-        log_info "Removing existing symlink..."
-        rm "$symlink"
-    elif [[ -f "$symlink" ]]; then
-        log_warn "File exists at $symlink (not a symlink)"
-        read -r -p "Replace? [y/N] " response
-        if [[ "$response" =~ ^[Yy]$ ]]; then
-            rm "$symlink"
-        else
-            return 1
-        fi
-    fi
+    if [[ "$(os_family)" == "windows" ]]; then
+        log_info "Installing as 'gwt' ('wt' is reserved by Windows Terminal)"
 
-    # Create symlink
-    log_info "Creating symlink: $symlink -> $SCRIPT_DIR/wt.sh"
-    ln -s "$SCRIPT_DIR/wt.sh" "$symlink"
+        local wrapper="$target_dir/gwt"
+        log_info "Creating launcher: $wrapper -> $SCRIPT_DIR/wt.sh"
+        cat > "$wrapper" << EOF
+#!/usr/bin/env bash
+export WT_MULTIPLEXER=none
+export WT_CMD=gwt
+exec "$SCRIPT_DIR/wt.sh" "\$@"
+EOF
+        chmod +x "$wrapper" 2>/dev/null || true
+
+        local shim="$target_dir/gwt.cmd"
+        # Resolve Git Bash to an absolute Windows path and set up the MSYS
+        # PATH. Two pitfalls this avoids:
+        #   1. A bare `bash` often resolves to WSL's
+        #      C:\Windows\System32\bash.exe, which can't see /c/... paths.
+        #   2. Calling usr\bin\bash.exe directly leaves coreutils (dirname,
+        #      sed, ...) off PATH. Git's bin\bash.exe launcher sets PATH up
+        #      and preserves the working directory.
+        local bash_win="bash"
+        local path_prefix=""
+        if command -v cygpath &>/dev/null; then
+            local root_win
+            root_win=$(cygpath -w / 2>/dev/null)
+            root_win="${root_win%\\}"
+            if [[ -n "$root_win" ]]; then
+                path_prefix="${root_win}\\mingw64\\bin;${root_win}\\usr\\bin;"
+                if [[ -f "/bin/bash.exe" ]]; then
+                    bash_win="${root_win}\\bin\\bash.exe"
+                else
+                    bash_win="${root_win}\\usr\\bin\\bash.exe"
+                fi
+            fi
+        fi
+        log_info "Creating launcher: $shim (for PowerShell / cmd.exe)"
+        cat > "$shim" << EOF
+@echo off
+set "PATH=${path_prefix}%PATH%"
+set "WT_MULTIPLEXER=none"
+set "WT_CMD=gwt"
+"$bash_win" "$SCRIPT_DIR/wt.sh" %*
+EOF
+    else
+        local symlink="$target_dir/wt"
+
+        # Remove existing symlink
+        if [[ -L "$symlink" ]]; then
+            log_info "Removing existing symlink..."
+            rm "$symlink"
+        elif [[ -f "$symlink" ]]; then
+            log_warn "File exists at $symlink (not a symlink)"
+            read -r -p "Replace? [y/N] " response
+            if [[ "$response" =~ ^[Yy]$ ]]; then
+                rm "$symlink"
+            else
+                return 1
+            fi
+        fi
+
+        # Create symlink
+        log_info "Creating symlink: $symlink -> $SCRIPT_DIR/wt.sh"
+        ln -s "$SCRIPT_DIR/wt.sh" "$symlink"
+    fi
 
     # Check if target_dir is in PATH
     if [[ ":$PATH:" != *":$target_dir:"* ]]; then
@@ -210,7 +289,7 @@ main() {
     # Run installation steps
     check_dependencies
     make_executable
-    create_symlink "$install_dir"
+    create_launcher "$install_dir"
 
     if [[ "$skip_completions" -eq 0 ]]; then
         echo ""
@@ -219,15 +298,19 @@ main() {
 
     create_config_dirs
 
+    # Command name: "gwt" on Windows (wt = Windows Terminal), else "wt".
+    local cmd="wt"
+    [[ "$(os_family)" == "windows" ]] && cmd="gwt"
+
     echo ""
     echo -e "${GREEN}${BOLD}Installation complete!${NC}"
     echo ""
     echo "Next steps:"
     echo "  1. Restart your shell or run: source ~/.bashrc (or ~/.zshrc)"
-    echo "  2. Verify installation: wt --version"
-    echo "  3. Initialize a project: cd <your-repo> && wt init"
+    echo "  2. Verify installation: $cmd --version"
+    echo "  3. Initialize a project: cd <your-repo> && $cmd init"
     echo ""
-    echo "For help: wt --help"
+    echo "For help: $cmd --help"
     echo ""
 }
 
