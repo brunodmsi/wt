@@ -56,15 +56,18 @@ Worktree management — `init`, `create`, `delete`, `list`, `status`, `ports`,
 > winget install psmux
 > ```
 >
-> psmux ships a `tmux` shim, so the installer auto-detects it, defaults
-> `WT_MULTIPLEXER=tmux`, and adds `set -g default-shell "C:\Program Files\Git\bin\bash.exe"`
-> to your `~/.tmux.conf`. That last part matters: psmux panes default to
-> **PowerShell**, but `wt` types **bash** commands into them, so pointing the
-> pane shell at Git Bash is what makes sessions/panes work. (Restart any running
-> psmux server with `tmux kill-server` after install to pick up the config.)
+> psmux ships a `tmux` shim, so when the installer sees it, it adds
+> `set -g default-shell "C:\Program Files\Git\bin\bash.exe"` to your
+> `~/.tmux.conf`. That matters: psmux panes default to **PowerShell**, but `wt`
+> types **bash** commands into them, so pointing the pane shell at Git Bash is
+> what makes sessions/panes work. (Restart any running psmux server with
+> `tmux kill-server` after install to pick up the config.)
 >
-> With no multiplexer installed the launchers default to `WT_MULTIPLEXER=none`,
-> so worktree management still works and the session commands no-op.
+> `wt` auto-detects the active multiplexer at runtime — `herdr`, `dmux`, psmux's
+> `tmux` shim, or `none` — so [herdr](https://herdr.dev) works too when you run
+> `gwt` from inside a herdr pane (it also needs `jq`:
+> `winget install jqlang.jq`). With none installed, worktree management still
+> works and the session commands no-op.
 > [WSL2](https://learn.microsoft.com/windows/wsl/) remains an alternative, where
 > real tmux + bash run exactly as on Linux.
 
@@ -80,8 +83,8 @@ winget install MikeFarah.yq
 
 The installer detects Windows and, instead of a symlink (which needs elevated
 privileges), writes two launchers into your install dir (`~/bin` by default),
-both setting `WT_CMD=gwt` and defaulting `WT_MULTIPLEXER` to `tmux` when psmux
-is detected, else `none`:
+both setting `WT_CMD=gwt` and leaving `WT_MULTIPLEXER` unset so `wt` auto-detects
+the active multiplexer at runtime (herdr / dmux / psmux / none):
 
 - `gwt`      — a Bash wrapper, used from **Git Bash**
 - `gwt.cmd`  — a shim so `gwt` also works from **PowerShell / cmd.exe**

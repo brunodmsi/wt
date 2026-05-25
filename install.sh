@@ -165,8 +165,9 @@ ensure_psmux_bash_shell() {
 # installed as "gwt" instead, because "wt" is taken by Windows Terminal
 # (wt.exe); symlinks also need elevated privileges, so we write small launcher
 # scripts. The Windows launchers set WT_CMD=gwt (so help/error text shows the
-# right command name) and default WT_MULTIPLEXER to "tmux" when a tmux shim
-# (psmux) is present, else "none" (worktree management only):
+# right command name) and leave WT_MULTIPLEXER unset, so wt auto-detects the
+# active multiplexer at runtime (herdr / dmux / psmux's tmux shim / none).
+# Pinning it would hide herdr when gwt runs from inside a herdr pane.
 #   - "gwt"     : a bash wrapper (used from Git Bash / MSYS2)
 #   - "gwt.cmd" : a shim so "gwt" also works from PowerShell / cmd.exe
 create_launcher() {
@@ -181,24 +182,20 @@ create_launcher() {
     if [[ "$(os_family)" == "windows" ]]; then
         log_info "Installing as 'gwt' ('wt' is reserved by Windows Terminal)"
 
-        # Pick the default multiplexer. psmux (a native Windows tmux clone) ships
-        # a `tmux` shim; with it present wt can drive real sessions/panes once the
-        # panes run bash (handled by ensure_psmux_bash_shell). No shim -> "none"
-        # (worktree management only).
-        local mux_default="none"
+        # Don't pin WT_MULTIPLEXER — wt auto-detects it at runtime (herdr via
+        # HERDR_SOCKET_PATH, then dmux, then psmux's tmux shim, else none).
+        # Pinning would hide herdr when gwt runs inside a herdr pane. If psmux
+        # (a native Windows tmux clone) is present, make sure its panes spawn
+        # bash, since wt types bash commands into them.
         if command -v tmux &>/dev/null; then
-            mux_default="tmux"
-            log_info "Detected a tmux shim (psmux) — defaulting WT_MULTIPLEXER=tmux"
+            log_info "Detected a tmux shim (psmux) — ensuring its panes run bash"
             ensure_psmux_bash_shell
-        else
-            log_info "No tmux shim found — defaulting WT_MULTIPLEXER=none (worktree management only)"
         fi
 
         local wrapper="$target_dir/gwt"
         log_info "Creating launcher: $wrapper -> $SCRIPT_DIR/wt.sh"
         cat > "$wrapper" << EOF
 #!/usr/bin/env bash
-export WT_MULTIPLEXER=${mux_default}
 export WT_CMD=gwt
 exec "$SCRIPT_DIR/wt.sh" "\$@"
 EOF
@@ -231,7 +228,6 @@ EOF
         cat > "$shim" << EOF
 @echo off
 set "PATH=${path_prefix}%PATH%"
-set "WT_MULTIPLEXER=${mux_default}"
 set "WT_CMD=gwt"
 "$bash_win" "$SCRIPT_DIR/wt.sh" %*
 EOF

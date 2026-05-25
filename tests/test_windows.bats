@@ -247,3 +247,27 @@ _source_installer() {
     [[ "$status" -eq 0 ]]
     [[ "$output" == *"bash.exe"* ]]
 }
+
+@test "create_launcher: gwt launchers do not pin WT_MULTIPLEXER (keeps herdr auto-detect)" {
+    if [[ "$(wt_os)" != "windows" ]]; then
+        skip "Windows-only launcher generation"
+    fi
+    _source_installer
+    local td="$TEST_TMPDIR/bin"
+    # create_launcher may touch ~/.tmux.conf via ensure_psmux_bash_shell; isolate HOME.
+    local oldhome="$HOME"
+    export HOME="$TEST_TMPDIR/home"
+    mkdir -p "$HOME"
+    create_launcher "$td" >/dev/null 2>&1 || true
+    export HOME="$oldhome"
+
+    run cat "$td/gwt"
+    [[ "$status" -eq 0 ]]
+    [[ "$output" != *"WT_MULTIPLEXER"* ]]
+    [[ "$output" == *"WT_CMD=gwt"* ]]
+
+    if [[ -f "$td/gwt.cmd" ]]; then
+        run cat "$td/gwt.cmd"
+        [[ "$output" != *"WT_MULTIPLEXER"* ]]
+    fi
+}

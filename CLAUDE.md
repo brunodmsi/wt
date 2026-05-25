@@ -49,11 +49,13 @@ docs/              # configuration.md reference
   `psmux` (it ships a `tmux` shim) DO work for orchestration: psmux panes
   default to PowerShell, but `set -g default-shell "C:\Program Files\Git\bin\bash.exe"`
   in `~/.tmux.conf` makes panes spawn Git Bash — which is what wt's pane commands
-  (`cd '/c/...'`, service commands) expect. `install.sh` auto-detects the shim,
-  defaults `WT_MULTIPLEXER=tmux`, and writes that default-shell block
-  (`ensure_psmux_bash_shell`). Using `usr\bin\bash.exe` directly is wrong — it
-  skips MSYS PATH setup (no `ls`/`git`); use the `bin\bash.exe` launcher. WSL2
-  remains an alternative for Linux-native tmux.
+  (`cd '/c/...'`, service commands) expect. `install.sh` detects the shim and
+  writes that default-shell block (`ensure_psmux_bash_shell`). Using
+  `usr\bin\bash.exe` directly is wrong — it skips MSYS PATH setup (no `ls`/`git`);
+  use the `bin\bash.exe` launcher. WSL2 remains an alternative for Linux-native
+  tmux. NEVER pin `WT_MULTIPLEXER` in the launchers — leave it unset so
+  `detect_multiplexer` can pick herdr (via `HERDR_SOCKET_PATH`) / dmux / psmux /
+  none at runtime; pinning it hides herdr when gwt runs inside a herdr pane.
 - **Command name (`$WT_CMD`)**: user-facing text must reference `$WT_CMD` (set in
   lib/utils.sh, default `wt`), never a hard-coded `wt`. On Windows `wt` is taken
   by Windows Terminal, so the launcher installs as `gwt` and exports `WT_CMD=gwt`.

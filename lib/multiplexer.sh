@@ -9,8 +9,19 @@
 # service lifecycle (`wt start`/`stop`/`restart`/`status`/`delete`) still drive
 # tmux directly, so they are no-ops or broken under herdr. See issue #10.
 
+# True when the herdr CLI can reach a running herdr server. herdr's CLI talks to
+# its server over a default socket, so tab focus/create work from any shell —
+# not just panes herdr spawned (which alone get HERDR_SOCKET_PATH). This lets
+# `wt attach` find herdr when gwt is run from a non-herdr pane. Guarded by
+# command_exists so it costs nothing on machines without herdr.
+herdr_server_running() {
+    command_exists herdr || return 1
+    herdr status server 2>/dev/null | grep -q "status: running"
+}
+
 # Detect which multiplexer is currently active.
-# Order: WT_MULTIPLEXER override -> herdr -> dmux -> tmux -> none
+# Order: WT_MULTIPLEXER override -> herdr pane -> dmux/tmux pane ->
+#        running herdr server -> tmux on PATH -> none
 # Output: one of "tmux", "dmux", "herdr", "none"
 detect_multiplexer() {
     if [[ -n "${WT_MULTIPLEXER:-}" ]]; then
@@ -42,6 +53,14 @@ detect_multiplexer() {
             return 0
         fi
         echo "tmux"
+        return 0
+    fi
+
+    # Not inside any pane: if a herdr server is reachable, drive herdr (its CLI
+    # works over the socket from any shell). Ranks above a merely-installed tmux
+    # shim (e.g. psmux) because a running herdr is the active workspace manager.
+    if herdr_server_running; then
+        echo "herdr"
         return 0
     fi
 
