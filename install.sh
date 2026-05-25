@@ -46,7 +46,7 @@ dep_install_hint() {
         windows)
             case "$tool" in
                 yq) echo "winget install MikeFarah.yq (or: scoop install yq)" ;;
-                tmux) echo "optional; use WSL for service/session features" ;;
+                tmux) echo "optional; winget install psmux for native sessions, or use WSL2 for Linux-native tmux" ;;
                 *) echo "winget install $tool (or: scoop install $tool)" ;;
             esac
             ;;
@@ -95,12 +95,78 @@ make_executable() {
     chmod +x "$SCRIPT_DIR/commands/"*.sh 2>/dev/null || true
 }
 
+# Resolve the Windows path to the Git Bash launcher (bin\bash.exe), which sets
+# up the MSYS PATH so panes get coreutils + git. Falls back to usr\bin\bash.exe.
+# Echoes the Windows path on success; returns non-zero when it can't resolve
+# (e.g. cygpath absent, i.e. not running under a Windows POSIX layer).
+git_bash_launcher_win() {
+    command -v cygpath &>/dev/null || return 1
+    local root_win
+    root_win=$(cygpath -w / 2>/dev/null)
+    root_win="${root_win%\\}"
+    [[ -n "$root_win" ]] || return 1
+    if [[ -f "/bin/bash.exe" ]]; then
+        printf '%s\\bin\\bash.exe' "$root_win"
+    else
+        printf '%s\\usr\\bin\\bash.exe' "$root_win"
+    fi
+}
+
+# True when <file> already has an active (non-commented) default-shell setting.
+tmux_conf_has_default_shell() {
+    local file="$1"
+    [[ -f "$file" ]] || return 1
+    grep -Eq '^[[:space:]]*set[^#]*default-shell' "$file"
+}
+
+# Append a managed default-shell block to <file> so psmux panes run bash.
+# Returns 0 when it appends, 2 when a default-shell is already present (left
+# untouched). Pure (takes file + shell path) so it is unit-testable.
+ensure_tmux_conf_default_shell() {
+    local file="$1"
+    local shell_win="$2"
+
+    if tmux_conf_has_default_shell "$file"; then
+        return 2
+    fi
+
+    {
+        [[ -f "$file" ]] && echo ""
+        echo "# >>> wt (psmux) >>>"
+        echo "# psmux panes default to PowerShell, but wt types bash commands into"
+        echo "# them. Point the pane shell at Git Bash. Delete this block to opt out."
+        echo "set -g default-shell \"$shell_win\""
+        echo "# <<< wt (psmux) <<<"
+    } >> "$file"
+    return 0
+}
+
+# Windows-only: ensure ~/.tmux.conf makes psmux spawn bash panes. Called from
+# create_launcher when a tmux shim (psmux) is detected.
+ensure_psmux_bash_shell() {
+    local conf="$HOME/.tmux.conf"
+    local shell_win
+    if ! shell_win=$(git_bash_launcher_win); then
+        log_warn "Could not resolve the Git Bash path. Add this to ~/.tmux.conf so"
+        log_warn "psmux panes run bash: set -g default-shell \"C:\\Program Files\\Git\\bin\\bash.exe\""
+        return 0
+    fi
+    if ensure_tmux_conf_default_shell "$conf" "$shell_win"; then
+        log_success "Set psmux pane shell to Git Bash in ~/.tmux.conf"
+        log_info "Run 'tmux kill-server' to restart psmux and apply (default-shell: $shell_win)"
+    else
+        log_info "~/.tmux.conf already sets default-shell — left untouched."
+    fi
+    return 0
+}
+
 # Install the launcher into target_dir.
 # On macOS/Linux this is a symlink named "wt". On Windows the command is
 # installed as "gwt" instead, because "wt" is taken by Windows Terminal
 # (wt.exe); symlinks also need elevated privileges, so we write small launcher
-# scripts. The Windows launchers default WT_MULTIPLEXER=none (no usable tmux)
-# and WT_CMD=gwt (so help/error text shows the right command name):
+# scripts. The Windows launchers set WT_CMD=gwt (so help/error text shows the
+# right command name) and default WT_MULTIPLEXER to "tmux" when a tmux shim
+# (psmux) is present, else "none" (worktree management only):
 #   - "gwt"     : a bash wrapper (used from Git Bash / MSYS2)
 #   - "gwt.cmd" : a shim so "gwt" also works from PowerShell / cmd.exe
 create_launcher() {
@@ -115,11 +181,24 @@ create_launcher() {
     if [[ "$(os_family)" == "windows" ]]; then
         log_info "Installing as 'gwt' ('wt' is reserved by Windows Terminal)"
 
+        # Pick the default multiplexer. psmux (a native Windows tmux clone) ships
+        # a `tmux` shim; with it present wt can drive real sessions/panes once the
+        # panes run bash (handled by ensure_psmux_bash_shell). No shim -> "none"
+        # (worktree management only).
+        local mux_default="none"
+        if command -v tmux &>/dev/null; then
+            mux_default="tmux"
+            log_info "Detected a tmux shim (psmux) — defaulting WT_MULTIPLEXER=tmux"
+            ensure_psmux_bash_shell
+        else
+            log_info "No tmux shim found — defaulting WT_MULTIPLEXER=none (worktree management only)"
+        fi
+
         local wrapper="$target_dir/gwt"
         log_info "Creating launcher: $wrapper -> $SCRIPT_DIR/wt.sh"
         cat > "$wrapper" << EOF
 #!/usr/bin/env bash
-export WT_MULTIPLEXER=none
+export WT_MULTIPLEXER=${mux_default}
 export WT_CMD=gwt
 exec "$SCRIPT_DIR/wt.sh" "\$@"
 EOF
@@ -152,7 +231,7 @@ EOF
         cat > "$shim" << EOF
 @echo off
 set "PATH=${path_prefix}%PATH%"
-set "WT_MULTIPLEXER=none"
+set "WT_MULTIPLEXER=${mux_default}"
 set "WT_CMD=gwt"
 "$bash_win" "$SCRIPT_DIR/wt.sh" %*
 EOF
@@ -314,4 +393,8 @@ main() {
     echo ""
 }
 
-main "$@"
+# Only run the installer when executed directly; sourcing (e.g. from tests)
+# exposes the helper functions without performing an install.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

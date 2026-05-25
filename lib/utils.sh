@@ -114,7 +114,7 @@ dep_hint() {
             case "$tool" in
                 yq) echo "winget install MikeFarah.yq (or: scoop install yq / choco install yq)" ;;
                 jq) echo "winget install jqlang.jq (or: scoop install jq)" ;;
-                tmux) echo "optional; use WSL for full service/session features (psmux runs PowerShell panes and can't host wt's bash orchestration)" ;;
+                tmux) echo "optional; 'winget install psmux' for native sessions (set default-shell to Git Bash in ~/.tmux.conf), or use WSL2 for Linux-native tmux" ;;
                 envsubst) echo "ships with Git for Windows / MSYS2 (gettext)" ;;
                 *) echo "winget install $tool (or: scoop install $tool)" ;;
             esac

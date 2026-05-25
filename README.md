@@ -49,13 +49,24 @@ Worktree management — `init`, `create`, `delete`, `list`, `status`, `ports`,
 
 > **tmux is not bundled with Git for Windows.** The service/session commands
 > (`start`, `stop`, `restart`, `attach`, `send`, `logs`, `panes`) require a
-> terminal multiplexer. The Windows launchers default to `WT_MULTIPLEXER=none`,
-> so worktree management works and those commands no-op. Native Windows tmux
-> ports such as **psmux** are *not* sufficient — they run **PowerShell** panes
-> and can't host the interactive bash that `wt` types commands into (you'll see
-> errors like `0x80070002 … cannot find the file`). For the **full multiplexer
-> workflow, use [WSL2](https://learn.microsoft.com/windows/wsl/)**, where real
-> tmux + bash run exactly as on Linux.
+> terminal multiplexer. Install **[psmux](https://github.com/psmux/psmux)** — a
+> native Windows tmux clone — for the full workflow without WSL:
+>
+> ```powershell
+> winget install psmux
+> ```
+>
+> psmux ships a `tmux` shim, so the installer auto-detects it, defaults
+> `WT_MULTIPLEXER=tmux`, and adds `set -g default-shell "C:\Program Files\Git\bin\bash.exe"`
+> to your `~/.tmux.conf`. That last part matters: psmux panes default to
+> **PowerShell**, but `wt` types **bash** commands into them, so pointing the
+> pane shell at Git Bash is what makes sessions/panes work. (Restart any running
+> psmux server with `tmux kill-server` after install to pick up the config.)
+>
+> With no multiplexer installed the launchers default to `WT_MULTIPLEXER=none`,
+> so worktree management still works and the session commands no-op.
+> [WSL2](https://learn.microsoft.com/windows/wsl/) remains an alternative, where
+> real tmux + bash run exactly as on Linux.
 
 ```bash
 # 1. Install the one required dependency (yq). Pick one:
@@ -69,7 +80,8 @@ winget install MikeFarah.yq
 
 The installer detects Windows and, instead of a symlink (which needs elevated
 privileges), writes two launchers into your install dir (`~/bin` by default),
-both defaulting to `WT_MULTIPLEXER=none` and `WT_CMD=gwt`:
+both setting `WT_CMD=gwt` and defaulting `WT_MULTIPLEXER` to `tmux` when psmux
+is detected, else `none`:
 
 - `gwt`      — a Bash wrapper, used from **Git Bash**
 - `gwt.cmd`  — a shim so `gwt` also works from **PowerShell / cmd.exe**

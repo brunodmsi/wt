@@ -174,3 +174,76 @@ _require_yq() {
     # well-formed project should not fail solely because tmux is unavailable.
     [[ "$status" -eq 0 ]]
 }
+
+# --- install.sh: psmux / .tmux.conf default-shell helpers ---
+#
+# These drive the pure helpers that make install.sh point psmux panes at Git
+# Bash (psmux otherwise spawns PowerShell, which can't run wt's bash pane
+# commands). install.sh guards main behind a BASH_SOURCE check so sourcing it
+# only exposes functions; it enables `set -euo pipefail` at source time, so the
+# helper below turns that back off for bats assertions.
+_source_installer() {
+    source "$WT_SCRIPT_DIR/install.sh"
+    set +euo pipefail
+}
+
+@test "tmux_conf_has_default_shell: false for a missing file" {
+    _source_installer
+    run tmux_conf_has_default_shell "$TEST_TMPDIR/nope.conf"
+    [[ "$status" -ne 0 ]]
+}
+
+@test "tmux_conf_has_default_shell: true when set, false when only commented" {
+    _source_installer
+    printf 'set -g default-shell "x"\n' > "$TEST_TMPDIR/active.conf"
+    run tmux_conf_has_default_shell "$TEST_TMPDIR/active.conf"
+    [[ "$status" -eq 0 ]]
+
+    printf '# set -g default-shell "x"\n' > "$TEST_TMPDIR/commented.conf"
+    run tmux_conf_has_default_shell "$TEST_TMPDIR/commented.conf"
+    [[ "$status" -ne 0 ]]
+}
+
+@test "ensure_tmux_conf_default_shell: appends a managed block when missing" {
+    _source_installer
+    local f="$TEST_TMPDIR/new.conf"
+    run ensure_tmux_conf_default_shell "$f" 'C:\Program Files\Git\bin\bash.exe'
+    [[ "$status" -eq 0 ]]
+    run cat "$f"
+    [[ "$output" == *"default-shell"* ]]
+    [[ "$output" == *"bash.exe"* ]]
+    [[ "$output" == *">>> wt (psmux) >>>"* ]]
+}
+
+@test "ensure_tmux_conf_default_shell: idempotent, leaves an existing setting alone" {
+    _source_installer
+    local f="$TEST_TMPDIR/idem.conf"
+    run ensure_tmux_conf_default_shell "$f" 'C:\bash.exe'
+    [[ "$status" -eq 0 ]]
+    # Second call must not append again.
+    run ensure_tmux_conf_default_shell "$f" 'C:\bash.exe'
+    [[ "$status" -eq 2 ]]
+    run grep -c "default-shell" "$f"
+    [[ "$output" == "1" ]]
+}
+
+@test "ensure_tmux_conf_default_shell: preserves prior config content" {
+    _source_installer
+    local f="$TEST_TMPDIR/pre.conf"
+    printf 'set -g mouse on\n' > "$f"
+    run ensure_tmux_conf_default_shell "$f" 'C:\bash.exe'
+    [[ "$status" -eq 0 ]]
+    run cat "$f"
+    [[ "$output" == *"mouse on"* ]]
+    [[ "$output" == *"default-shell"* ]]
+}
+
+@test "git_bash_launcher_win: resolves a bash.exe path on Windows" {
+    if [[ "$(wt_os)" != "windows" ]]; then
+        skip "Windows-only path resolution (needs cygpath)"
+    fi
+    _source_installer
+    run git_bash_launcher_win
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *"bash.exe"* ]]
+}

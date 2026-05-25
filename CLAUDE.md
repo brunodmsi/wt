@@ -45,10 +45,15 @@ docs/              # configuration.md reference
 - **Windows (Git Bash / MSYS2)**: worktree management runs natively. tmux isn't
   bundled with Git for Windows, so when it's absent `start`/`stop`/`attach`/
   `send`/`logs`/`panes` degrade to the `none` multiplexer. Keep tmux strictly
-  optional and never `exit` on a missing tmux. Note: native Windows tmux ports
-  like `psmux` are auto-detected but unusable for orchestration — they run
-  PowerShell panes and can't host an interactive bash, while wt's pane commands
-  are bash. For the full multiplexer workflow on Windows, use WSL2.
+  optional and never `exit` on a missing tmux. Native Windows tmux ports like
+  `psmux` (it ships a `tmux` shim) DO work for orchestration: psmux panes
+  default to PowerShell, but `set -g default-shell "C:\Program Files\Git\bin\bash.exe"`
+  in `~/.tmux.conf` makes panes spawn Git Bash — which is what wt's pane commands
+  (`cd '/c/...'`, service commands) expect. `install.sh` auto-detects the shim,
+  defaults `WT_MULTIPLEXER=tmux`, and writes that default-shell block
+  (`ensure_psmux_bash_shell`). Using `usr\bin\bash.exe` directly is wrong — it
+  skips MSYS PATH setup (no `ls`/`git`); use the `bin\bash.exe` launcher. WSL2
+  remains an alternative for Linux-native tmux.
 - **Command name (`$WT_CMD`)**: user-facing text must reference `$WT_CMD` (set in
   lib/utils.sh, default `wt`), never a hard-coded `wt`. On Windows `wt` is taken
   by Windows Terminal, so the launcher installs as `gwt` and exports `WT_CMD=gwt`.
