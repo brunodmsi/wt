@@ -290,6 +290,39 @@ ports:
     [[ "$output" == *"out of bounds"* ]]
 }
 
+@test "load_project_config warns when slots overshoot reserved range" {
+    create_yaml_fixture "$WT_PROJECTS_DIR/overproj.yaml" 'name: overproj
+repo_path: /tmp
+ports:
+  reserved:
+    range: { min: 3000, max: 3005 }
+    slots: 11
+    services:
+      app: 0
+  dynamic:
+    range: { min: 4000, max: 5000 }'
+    run load_project_config "overproj"
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *"exceed the port range"* ]]
+}
+
+@test "load_project_config does not warn when single service fits the range" {
+    # Mirrors a valid super-gap config: 11 slots, 1 service, 3000-3011 range.
+    create_yaml_fixture "$WT_PROJECTS_DIR/okproj.yaml" 'name: okproj
+repo_path: /tmp
+ports:
+  reserved:
+    range: { min: 3000, max: 3011 }
+    slots: 11
+    services:
+      app: 0
+  dynamic:
+    range: { min: 4000, max: 5000 }'
+    run load_project_config "okproj"
+    [[ "$status" -eq 0 ]]
+    [[ "$output" != *"exceed the port range"* ]]
+}
+
 # --- get_setup_steps / get_setup_step ---
 
 @test "get_setup_steps returns count" {

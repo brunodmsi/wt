@@ -236,6 +236,21 @@ load_project_config() {
         die "Dynamic port range out of bounds (must be 1-65535)"
     fi
 
+    # Warn if the configured slot count can't fit within the reserved range.
+    # Each slot spans (highest service offset + 1) ports; the highest slot is
+    # slots-1, so its top port must stay within the range max. Catches configs
+    # where slots are over-provisioned and high slots would overshoot the range.
+    local _max_offset
+    _max_offset=$(yq -r '.ports.reserved.services // {} | to_entries | map(.value) | max // -1' "$config_file" 2>/dev/null)
+    [[ "$_max_offset" =~ ^-?[0-9]+$ ]] || _max_offset=-1
+    if (( _max_offset >= 0 )) && [[ "$PROJECT_RESERVED_SLOTS" =~ ^[0-9]+$ ]] && (( PROJECT_RESERVED_SLOTS > 0 )); then
+        local _per_slot=$((_max_offset + 1))
+        local _top_port=$(( PROJECT_RESERVED_PORT_MIN + (PROJECT_RESERVED_SLOTS - 1) * _per_slot + _max_offset ))
+        if (( _top_port > PROJECT_RESERVED_PORT_MAX )); then
+            log_warn "Reserved slots ($PROJECT_RESERVED_SLOTS) exceed the port range: highest slot needs port $_top_port but range max is $PROJECT_RESERVED_PORT_MAX. Reduce slots or widen ports.reserved.range."
+        fi
+    fi
+
     log_debug "Loaded config for project: $PROJECT_NAME"
     log_debug "  Repo path: $PROJECT_REPO_PATH"
     log_debug "  Reserved ports: $PROJECT_RESERVED_PORT_MIN-$PROJECT_RESERVED_PORT_MAX"
