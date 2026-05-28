@@ -543,9 +543,9 @@ hooks:
     port1=$(get_service_port "web" "feature/multi-a" "$WT_PROJECTS_DIR/testproj.yaml" "$slot1")
     port2=$(get_service_port "web" "feature/multi-b" "$WT_PROJECTS_DIR/testproj.yaml" "$slot2")
 
-    # services_per_slot defaults to 2, so slot 0 -> 3000, slot 1 -> 3002
+    # One reserved service spans 1 port per slot: slot 0 -> 3000, slot 1 -> 3001
     [[ "$port1" == "3000" ]]
-    [[ "$port2" == "3002" ]]
+    [[ "$port2" == "3001" ]]
     [[ "$port1" != "$port2" ]]
 }
 
