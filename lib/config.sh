@@ -160,8 +160,14 @@ detect_project() {
     local repo_root
     repo_root=$(git_root 2>/dev/null) || { echo ""; return 0; }
 
-    # If we're inside a worktree, get the main repo path
-    if [[ "$repo_root" == *"/.worktrees/"* ]]; then
+    # Resolve the main repo for any linked worktree (Orca, .worktrees, external
+    # tools) via the shared git common dir: dirname(<main>/.git) == <main>.
+    # Falls back to the /.worktrees/ strip when git is too old for --path-format.
+    local common
+    common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+    if [[ -n "$common" ]]; then
+        repo_root=$(dirname "$common")
+    elif [[ "$repo_root" == *"/.worktrees/"* ]]; then
         repo_root="${repo_root%/.worktrees/*}"
     fi
 
@@ -187,6 +193,42 @@ detect_project() {
             return 0
         fi
     done
+
+    echo ""
+    return 0
+}
+
+# Resolve a project name from a main-repo path, independent of the CWD.
+# Used by `wt claim`/`wt release`, which know the main repo from the worktree's
+# git common dir rather than from where the command runs. Matches a config
+# whose repo_path equals the path, else falls back to the basename if a config
+# by that name exists. Echoes "" when nothing matches.
+project_for_repo_path() {
+    local main_repo="$1"
+
+    [[ -z "$main_repo" ]] && { echo ""; return 0; }
+
+    # Prefer an exact repo_path match
+    local config_file config_repo_path
+    for config_file in "$WT_PROJECTS_DIR"/*.yaml; do
+        [[ -f "$config_file" ]] || continue
+
+        config_repo_path=$(yaml_get "$config_file" ".repo_path" "")
+        config_repo_path=$(expand_path "$config_repo_path")
+
+        if [[ -n "$config_repo_path" ]] && [[ "$config_repo_path" == "$main_repo" ]]; then
+            basename "$config_file" .yaml
+            return 0
+        fi
+    done
+
+    # Fall back to the basename if a config by that name exists
+    local base
+    base=$(basename "$main_repo")
+    if has_project_config "$base"; then
+        echo "$base"
+        return 0
+    fi
 
     echo ""
     return 0
