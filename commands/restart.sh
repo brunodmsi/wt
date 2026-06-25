@@ -72,7 +72,7 @@ cmd_restart() {
     project=$(require_project "$project")
     load_project_config "$project"
 
-    if ! worktree_exists "$branch" "$PROJECT_REPO_PATH"; then
+    if ! worktree_dir_exists "$project" "$branch" "$PROJECT_REPO_PATH"; then
         die "Worktree not found for branch: $branch"
     fi
 

@@ -53,8 +53,8 @@ cmd_status() {
     # Clean up stale worktree entries
     cleanup_stale_worktrees "$project"
 
-    # Check worktree exists
-    if ! worktree_exists "$branch" "$PROJECT_REPO_PATH"; then
+    # Check worktree exists (state-authoritative; covers claimed worktrees)
+    if ! worktree_dir_exists "$project" "$branch" "$PROJECT_REPO_PATH"; then
         die "Worktree not found for branch: $branch"
     fi
 
@@ -71,6 +71,10 @@ cmd_status() {
     local created_at
     created_at=$(get_worktree_state "$project" "$branch" "created_at")
 
+    # Worktrees adopted via `wt claim` are flagged with source=claimed
+    local wt_source
+    wt_source=$(get_worktree_state "$project" "$branch" "source")
+
     # Clean up stale services
     cleanup_stale_services "$project" "$branch"
 
@@ -84,6 +88,7 @@ cmd_status() {
     print_kv "Path" "$wt_path"
     print_kv "Slot" "$slot"
     print_kv "Created" "$created_at"
+    [[ -n "$wt_source" ]] && print_kv "Source" "$wt_source"
 
     # Git info (single git call for commit, dirty state, tracking, ahead/behind)
     if [[ -d "$wt_path" ]]; then

@@ -21,13 +21,49 @@ worktree_path() {
     echo "$(worktrees_dir "$repo_root")/$sanitized"
 }
 
-# Check if a worktree exists for a branch
+# Resolve the main repository root for a (possibly linked) worktree path.
+# The shared git common dir is <main_repo>/.git, so its parent is the main
+# repo. Works for worktrees created anywhere (Orca, .worktrees, external
+# tools) — not just <repo>/.worktrees. Echoes the path; returns 1 on failure.
+main_repo_from_path() {
+    local wt_path="${1:-.}"
+
+    local common
+    common=$(git -C "$wt_path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+    if [[ -z "$common" ]]; then
+        # Older git without --path-format: absolutize a possibly-relative path.
+        common=$(git -C "$wt_path" rev-parse --git-common-dir 2>/dev/null) || return 1
+        [[ "$common" != /* ]] && common="$wt_path/$common"
+    fi
+
+    [[ -z "$common" ]] && return 1
+    dirname "$common"
+}
+
+# Check if a worktree exists for a branch (convention path only)
 worktree_exists() {
     local branch="$1"
     local repo_root="${2:-$(git_root)}"
 
     local path
     path=$(worktree_path "$branch" "$repo_root")
+
+    [[ -d "$path" ]]
+}
+
+# State-authoritative existence check. A worktree "exists" if its recorded
+# state path (preferred) or the convention path resolves to a real directory.
+# Claimed worktrees live outside <repo>/.worktrees, so worktree_exists (which
+# only checks the convention path) would miss them — runtime command gates use
+# this so claimed worktrees behave like wt-created ones. Returns 0 on success.
+worktree_dir_exists() {
+    local project="$1"
+    local branch="$2"
+    local repo_root="${3:-$(git_root)}"
+
+    local path
+    path=$(get_worktree_path "$project" "$branch")
+    [[ -z "$path" ]] && path=$(worktree_path "$branch" "$repo_root")
 
     [[ -d "$path" ]]
 }
@@ -249,13 +285,15 @@ detect_worktree_branch() {
         fi
     fi
 
-    # Try using git to detect if in a worktree
+    # Try using git to detect if we're in any linked worktree (not just
+    # /.worktrees/ — also Orca/external worktrees). A linked worktree's
+    # toplevel differs from the main repo root (parent of the git common dir).
     if git rev-parse --is-inside-work-tree &>/dev/null; then
-        local toplevel
+        local toplevel main_repo
         toplevel=$(git rev-parse --show-toplevel 2>/dev/null)
+        main_repo=$(main_repo_from_path "$toplevel" 2>/dev/null) || main_repo=""
 
-        if [[ "$toplevel" == *"/.worktrees/"* ]]; then
-            # We're in a worktree, get the branch
+        if [[ -n "$toplevel" ]] && [[ -n "$main_repo" ]] && [[ "$toplevel" != "$main_repo" ]]; then
             local branch
             branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
             if [[ -n "$branch" ]] && [[ "$branch" != "HEAD" ]]; then

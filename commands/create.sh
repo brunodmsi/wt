@@ -126,6 +126,12 @@ cmd_create() {
     # Export global env vars
     export_env_vars "$PROJECT_CONFIG_FILE"
 
+    # Export MAIN_REPO so setup steps can resolve repo-root paths regardless of
+    # where the worktree lives. For wt-created worktrees this equals what a
+    # config's `../..` previously resolved to; `wt claim` exports the same var
+    # for worktrees that live outside <repo>/.worktrees.
+    export MAIN_REPO="$repo_root"
+
     # Run setup steps
     local setup_failed=0
     if [[ "$no_setup" -eq 0 ]]; then

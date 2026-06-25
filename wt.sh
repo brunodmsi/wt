@@ -30,6 +30,8 @@ source "${WT_SCRIPT_DIR}/lib/service.sh"
 
 # Source command modules
 source "${WT_SCRIPT_DIR}/commands/create.sh"
+source "${WT_SCRIPT_DIR}/commands/claim.sh"
+source "${WT_SCRIPT_DIR}/commands/release.sh"
 source "${WT_SCRIPT_DIR}/commands/delete.sh"
 source "${WT_SCRIPT_DIR}/commands/list.sh"
 source "${WT_SCRIPT_DIR}/commands/start.sh"
@@ -57,6 +59,8 @@ ${BOLD}USAGE${NC}
 ${BOLD}COMMANDS${NC}
     ${CYAN}Worktree Management${NC}
     create, new     Create a new worktree
+    claim           Adopt an externally-created worktree
+    release, unclaim Drop a claimed worktree (keeps the directory)
     delete, rm      Delete a worktree
     list, ls        List all worktrees
 
@@ -179,6 +183,12 @@ main() {
     case "$command" in
         create|new)
             cmd_create "$@"
+            ;;
+        claim)
+            cmd_claim "$@"
+            ;;
+        release|unclaim)
+            cmd_release "$@"
             ;;
         delete|rm)
             cmd_delete "$@"

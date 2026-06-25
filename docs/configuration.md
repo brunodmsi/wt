@@ -186,6 +186,27 @@ setup:
       SKIP_VALIDATION: "true"
 ```
 
+#### Variables available to setup steps
+
+Steps run inside the worktree (`working_dir` is relative to the worktree root) with these
+variables exported:
+
+| Variable | Description |
+|----------|-------------|
+| `MAIN_REPO` | Absolute path to the **main repository** checkout |
+| `PORT_<SERVICE>` | Port for each configured service (uppercase, dashes → underscores) |
+| `BRANCH_NAME` | The worktree's branch |
+
+Prefer `$MAIN_REPO` over hard-coded `../..` when referencing the main repo, so steps work
+whether the worktree lives in `<repo>/.worktrees` (`wt create`) or was adopted from another
+location via `wt claim`. Keep a fallback for safety:
+
+```yaml
+setup:
+  - name: copy-env
+    command: cp "${MAIN_REPO:-../..}/backend/.env" .env
+```
+
 ---
 
 ### Services

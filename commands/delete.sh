@@ -97,9 +97,11 @@ cmd_delete() {
     window_name=$(get_session_name "$project" "$branch")
     multiplexer_close_tab "$window_name" "$PROJECT_CONFIG_FILE"
 
-    # Run pre_delete hook if defined
+    # Run pre_delete hook if defined. Prefer the recorded state path so a
+    # claimed worktree (outside <repo>/.worktrees) gets the right WORKTREE_PATH.
     local wt_path
-    wt_path=$(worktree_path "$branch" "$repo_root")
+    wt_path=$(get_worktree_path "$project" "$branch")
+    [[ -z "$wt_path" ]] && wt_path=$(worktree_path "$branch" "$repo_root")
     export WORKTREE_PATH="$wt_path"
     export BRANCH_NAME="$branch"
     run_hook "$PROJECT_CONFIG_FILE" "pre_delete"

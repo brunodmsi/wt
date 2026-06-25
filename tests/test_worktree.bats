@@ -202,3 +202,50 @@ teardown() {
     run prune_worktrees "$TEST_REPO"
     [[ "$status" -eq 0 ]]
 }
+
+# --- main_repo_from_path ---
+
+@test "main_repo_from_path resolves the main repo from the main checkout" {
+    result=$(main_repo_from_path "$TEST_REPO")
+    [[ "$result" == "$TEST_REPO" ]]
+}
+
+@test "main_repo_from_path resolves the main repo from an external worktree" {
+    local ext
+    ext="$(cd "$TEST_TMPDIR" && pwd -P)/ext-main"
+    git -C "$TEST_REPO" worktree add "$ext" -b feat-ext >/dev/null 2>&1
+    result=$(main_repo_from_path "$ext")
+    [[ "$result" == "$TEST_REPO" ]]
+}
+
+@test "main_repo_from_path resolves the main repo from a .worktrees worktree" {
+    create_worktree "feature/wt-main" "" "$TEST_REPO" >/dev/null 2>&1
+    local wt
+    wt=$(worktree_path "feature/wt-main" "$TEST_REPO")
+    result=$(main_repo_from_path "$wt")
+    [[ "$result" == "$TEST_REPO" ]]
+}
+
+# --- detect_worktree_branch ---
+
+@test "detect_worktree_branch returns branch from an external (non-.worktrees) worktree" {
+    local ext
+    ext="$(cd "$TEST_TMPDIR" && pwd -P)/ext-branch"
+    git -C "$TEST_REPO" worktree add "$ext" -b feat-detect >/dev/null 2>&1
+    cd "$ext"
+    result=$(detect_worktree_branch)
+    [[ "$result" == "feat-detect" ]]
+}
+
+@test "detect_worktree_branch returns branch from a .worktrees worktree" {
+    create_worktree "feature/detect-conv" "" "$TEST_REPO" >/dev/null 2>&1
+    cd "$(worktree_path "feature/detect-conv" "$TEST_REPO")"
+    result=$(detect_worktree_branch)
+    [[ "$result" == "feature/detect-conv" ]]
+}
+
+@test "detect_worktree_branch returns empty in the main repo" {
+    cd "$TEST_REPO"
+    result=$(detect_worktree_branch)
+    [[ -z "$result" ]]
+}

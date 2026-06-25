@@ -89,8 +89,8 @@ cmd_start() {
     project=$(require_project "$project")
     load_project_config "$project"
 
-    # Verify worktree exists
-    if ! worktree_exists "$branch" "$PROJECT_REPO_PATH"; then
+    # Verify worktree exists (state-authoritative; covers claimed worktrees)
+    if ! worktree_dir_exists "$project" "$branch" "$PROJECT_REPO_PATH"; then
         die "Worktree not found for branch: $branch"
     fi
 

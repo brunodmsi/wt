@@ -124,12 +124,15 @@ cmd_attach() {
     local tmux_session
     tmux_session=$(get_tmux_session_name "$PROJECT_CONFIG_FILE")
 
-    # Check if window exists, create if needed
+    # Check if window exists, create if needed. Resolve the worktree path from
+    # state (authoritative for claimed worktrees that live outside
+    # <repo>/.worktrees), falling back to the convention path.
     if ! session_exists "$tmux_session" || ! window_exists "$tmux_session" "$window_name"; then
-        if worktree_exists "$branch" "$PROJECT_REPO_PATH"; then
+        local wt_path
+        wt_path=$(get_worktree_path "$project" "$branch")
+        [[ -z "$wt_path" ]] && wt_path=$(worktree_path "$branch" "$PROJECT_REPO_PATH")
+        if [[ -d "$wt_path" ]]; then
             log_info "Window not found, creating..."
-            local wt_path
-            wt_path=$(get_worktree_path "$project" "$branch")
             create_session "$window_name" "$wt_path" "$PROJECT_CONFIG_FILE" "$window"
         else
             die "No worktree found for branch: $branch"
