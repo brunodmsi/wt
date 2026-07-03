@@ -249,6 +249,7 @@ load_project_config() {
     PROJECT_NAME=$(yaml_get "$config_file" ".name" "$project")
     PROJECT_REPO_PATH=$(yaml_get "$config_file" ".repo_path")
     PROJECT_REPO_PATH=$(expand_path "$PROJECT_REPO_PATH")
+    # shellcheck disable=SC2034  # consumed by command modules that source this file
     PROJECT_CONFIG_FILE="$config_file"
 
     # Port configuration
