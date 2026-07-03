@@ -21,8 +21,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install ShellCheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      # Pin the ShellCheck version so results are reproducible — apt ships an
+      # older release whose check set differs from what changes are validated
+      # against locally.
+      - name: Install ShellCheck (pinned)
+        run: |
+          SC_VERSION=v0.11.0
+          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/${SC_VERSION}/shellcheck-${SC_VERSION}.linux.x86_64.tar.xz" | tar -xJ
+          sudo mv "shellcheck-${SC_VERSION}/shellcheck" /usr/local/bin/shellcheck
+          shellcheck --version
 
       # Lint every shell script (not the .bats test files, which use the bats DSL).
       # --severity=warning is the gate; --external-sources lets it follow `source` lines.
@@ -48,8 +55,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y tmux gettext-base
-          # mikefarah yq v4 — NOT the Python `yq` that ships in apt.
-          YQ_VERSION=v4.44.6
+          # mikefarah yq v4 — NOT the Python `yq` that ships in apt. Pinned to a
+          # version whose query behavior matches what tests are validated against
+          # (older 4.4x releases emit spurious output for empty maps).
+          YQ_VERSION=v4.50.1
           sudo curl -fsSL -o /usr/local/bin/yq \
             "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
           sudo chmod +x /usr/local/bin/yq
