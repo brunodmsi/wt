@@ -313,9 +313,9 @@ is_service_running() {
 cleanup_stale_services() {
     local project="$1"
     local branch="$2"
-    local svc_name svc_status svc_port svc_pid  # Declare local to avoid clobbering caller's vars
+    local svc_name svc_pid  # Declare local to avoid clobbering caller's vars
 
-    while IFS=: read -r svc_name svc_status svc_port svc_pid; do
+    while IFS=: read -r svc_name _ _ svc_pid; do
         [[ -z "$svc_name" ]] && continue
 
         if [[ -n "$svc_pid" ]] && [[ "$svc_pid" != "null" ]]; then
