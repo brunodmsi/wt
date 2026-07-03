@@ -474,6 +474,53 @@ hooks:
     [[ "$new_slot" == "0" ]]
 }
 
+@test "create: reclaims slots held by out-of-band-deleted worktrees" {
+    # Regression: `wt create` counted slot assignments whose worktree
+    # directories were removed manually (not via `wt delete`) against the
+    # limit, dying with "No available slots" even though every reserved slot
+    # was actually free. Only `wt list`/`wt status` cleaned up stale entries,
+    # so users had to run one of those before create would work again.
+    _create_test_config "testproj"
+    load_project_config "testproj"
+
+    # Fill all 3 reserved slots with worktrees whose directories don't exist.
+    claim_slot "testproj" "feature/stale-a" 3
+    claim_slot "testproj" "feature/stale-b" 3
+    claim_slot "testproj" "feature/stale-c" 3
+    create_worktree_state "testproj" "feature/stale-a" "/nonexistent/path/a" 0
+    create_worktree_state "testproj" "feature/stale-b" "/nonexistent/path/b" 1
+    create_worktree_state "testproj" "feature/stale-c" "/nonexistent/path/c" 2
+
+    # Sanity: no slot is available to a fresh claim before cleanup runs.
+    run claim_slot "testproj" "feature/blocked" 3
+    [[ "$status" -ne 0 ]]
+
+    # cmd_create must clean up the stale entries first, then succeed.
+    run bash -c '
+        source "$WT_SCRIPT_DIR/lib/utils.sh"
+        source "$WT_SCRIPT_DIR/lib/config.sh"
+        source "$WT_SCRIPT_DIR/lib/port.sh"
+        source "$WT_SCRIPT_DIR/lib/state.sh"
+        source "$WT_SCRIPT_DIR/lib/worktree.sh"
+        source "$WT_SCRIPT_DIR/lib/setup.sh"
+        source "$WT_SCRIPT_DIR/lib/multiplexer.sh"
+        source "$WT_SCRIPT_DIR/lib/tmux.sh"
+        source "$WT_SCRIPT_DIR/lib/service.sh"
+        source "$WT_SCRIPT_DIR/commands/create.sh"
+        export WT_STATE_DIR="'"$WT_STATE_DIR"'"
+        export WT_PROJECTS_DIR="'"$WT_PROJECTS_DIR"'"
+        export WT_MULTIPLEXER=none
+        cmd_create feature/reclaim -p testproj --no-setup --no-attach
+    '
+    [[ "$status" -eq 0 ]]
+    [[ "$output" != *"No available slots"* ]]
+
+    # The new worktree got a slot, and the stale entries were purged.
+    [[ -n "$(get_slot_for_worktree "testproj" "feature/reclaim")" ]]
+    [[ -z "$(get_slot_for_worktree "testproj" "feature/stale-a")" ]]
+    [[ -z "$(get_worktree_state "testproj" "feature/stale-a" "path")" ]]
+}
+
 # ===== exec with port env vars =====
 
 @test "exec: exports port variables" {

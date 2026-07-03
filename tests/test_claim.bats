@@ -209,6 +209,31 @@ _make_external_worktree() {
     [[ "$(get_worktree_path "test-repo" "feature/forced")" == "$ext" ]]
 }
 
+@test "claim: reclaims slots held by out-of-band-deleted worktrees" {
+    # Regression: like `wt create`, `wt claim` counted slot assignments whose
+    # worktree directories were removed manually against the limit, dying with
+    # "No available slots" even though every reserved slot was actually free.
+    _create_claim_config
+    local ext
+    ext=$(_make_external_worktree "feature/adopt")
+
+    # Fill all 3 reserved slots with worktrees whose directories don't exist.
+    claim_slot "test-repo" "feature/stale-a" 3
+    claim_slot "test-repo" "feature/stale-b" 3
+    claim_slot "test-repo" "feature/stale-c" 3
+    create_worktree_state "test-repo" "feature/stale-a" "/nonexistent/path/a" 0
+    create_worktree_state "test-repo" "feature/stale-b" "/nonexistent/path/b" 1
+    create_worktree_state "test-repo" "feature/stale-c" "/nonexistent/path/c" 2
+
+    run cmd_claim "$ext" -p test-repo --no-setup 2>&1
+    [[ "$status" -eq 0 ]]
+    [[ "$output" != *"No available slots"* ]]
+
+    # The adopted worktree got a slot, and the stale entries were purged.
+    [[ -n "$(get_slot_for_worktree "test-repo" "feature/adopt")" ]]
+    [[ -z "$(get_slot_for_worktree "test-repo" "feature/stale-a")" ]]
+}
+
 @test "claim: dies when path is not a git worktree" {
     _create_claim_config
     local notrepo="$EXT_BASE/plain-dir"

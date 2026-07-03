@@ -135,6 +135,11 @@ cmd_claim() {
     }
     trap _claim_cleanup INT TERM
 
+    # Reclaim slots held by worktrees whose directories were removed out-of-band
+    # (e.g. deleted manually instead of via `wt delete`), so they don't count
+    # against the slot limit and cause a spurious "no available slots" error.
+    cleanup_stale_worktrees "$project"
+
     # 6. Claim a slot for reserved ports
     local slot
     if ! slot=$(claim_slot "$project" "$branch" "$PROJECT_RESERVED_SLOTS"); then
