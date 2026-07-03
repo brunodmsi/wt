@@ -1,5 +1,7 @@
 # wt - Git Worktree Manager
 
+[![CI](https://github.com/brunodmsi/wt/actions/workflows/ci.yml/badge.svg)](https://github.com/brunodmsi/wt/actions/workflows/ci.yml)
+
 A CLI tool for managing git worktrees with tmux integration, automatic port allocation, and per-project setup automation.
 
 ## Why?

@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref (e.g. new pushes to a PR).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      # Lint every shell script (not the .bats test files, which use the bats DSL).
+      # --severity=warning is the gate; --external-sources lets it follow `source` lines.
+      - name: Run ShellCheck
+        run: |
+          find . -name '*.sh' -not -path './.git/*' -print0 \
+            | xargs -0 shellcheck --severity=warning --external-sources
+
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu = bash 5; macOS = native bash 3.2, which validates the
+        # 3.2 compatibility constraint the project relies on.
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux gettext-base
+          # mikefarah yq v4 — NOT the Python `yq` that ships in apt.
+          YQ_VERSION=v4.44.6
+          sudo curl -fsSL -o /usr/local/bin/yq \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install yq tmux gettext
+          # gettext is keg-only; put envsubst on PATH for the config tests.
+          echo "$(brew --prefix gettext)/bin" >> "$GITHUB_PATH"
+
+      - name: Install bats
+        run: |
+          git clone --depth 1 --branch v1.11.0 \
+            https://github.com/bats-core/bats-core.git "${RUNNER_TEMP}/bats-core"
+          sudo "${RUNNER_TEMP}/bats-core/install.sh" /usr/local
+
+      # Tests create real git repos/commits; runners have no git identity by default.
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@wt.test"
+          git config --global user.name "wt CI"
+          git config --global init.defaultBranch main
+
+      - name: Tool versions
+        run: |
+          echo "bash (PATH):   $(bash --version | head -1)"
+          echo "/bin/bash:     $(/bin/bash --version | head -1)"
+          yq --version
+          tmux -V
+          bats --version
+          git --version
+
+      # `wt.sh` has a `#!/bin/bash` shebang, so on macOS this exercises the full
+      # module-sourcing path under bash 3.2.
+      - name: Syntax check (bash -n)
+        run: |
+          find . -name '*.sh' -not -path './.git/*' -print0 \
+            | xargs -0 -n1 bash -n
+          echo "all shell scripts parse cleanly"
+
+      - name: CLI smoke test
+        run: |
+          chmod +x ./wt.sh
+          ./wt.sh --version
+          ./wt.sh --help >/dev/null
+          # An unknown command must exit non-zero.
+          if ./wt.sh definitely-not-a-real-command >/dev/null 2>&1; then
+            echo "expected non-zero exit for an unknown command" >&2
+            exit 1
+          fi
+          echo "CLI smoke test passed"
+
+      - name: Run test suite
+        run: bats --print-output-on-failure tests/
