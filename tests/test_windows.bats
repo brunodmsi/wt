@@ -271,3 +271,12 @@ _source_installer() {
         [[ "$output" != *"WT_MULTIPLEXER"* ]]
     fi
 }
+
+# --- completions: the bash completion must attach to gwt too (Windows name) ---
+
+@test "completions: _wt_completions is registered for both wt and gwt" {
+    run bash -c "source '$WT_SCRIPT_DIR/completions/wt.bash'; complete -p wt gwt"
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *"_wt_completions wt"* ]]
+    [[ "$output" == *"_wt_completions gwt"* ]]
+}
