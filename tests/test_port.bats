@@ -246,6 +246,27 @@ teardown() {
     [[ "$output" == *"backend:3003"* ]]
 }
 
+# Regression: a single reserved service spans 1 port per slot, not 2.
+# Previously services_per_slot was hardcoded to 2, so high slots overshot the
+# configured range (e.g. slot 10 -> 3020 with a 3000-3011 range).
+@test "calculate_worktree_ports single service spaces slots by 1" {
+    create_yaml_fixture "$TEST_TMPDIR/config.yaml" 'ports:
+  reserved:
+    range: { min: 3000, max: 3011 }
+    services:
+      gap-app-v2: 0
+  dynamic:
+    range: { min: 4000, max: 5000 }
+    services: {}'
+    run calculate_worktree_ports "main" "$TEST_TMPDIR/config.yaml" 0
+    [[ "$output" == *"gap-app-v2:3000"* ]]
+    run calculate_worktree_ports "main" "$TEST_TMPDIR/config.yaml" 1
+    [[ "$output" == *"gap-app-v2:3001"* ]]
+    # Highest slot must stay within the configured range max (3011), not 3020.
+    run calculate_worktree_ports "main" "$TEST_TMPDIR/config.yaml" 10
+    [[ "$output" == *"gap-app-v2:3010"* ]]
+}
+
 # --- export_port_vars ---
 
 @test "export_port_vars exports PORT_ variables" {

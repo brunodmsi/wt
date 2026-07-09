@@ -290,6 +290,39 @@ ports:
     [[ "$output" == *"out of bounds"* ]]
 }
 
+@test "load_project_config warns when slots overshoot reserved range" {
+    create_yaml_fixture "$WT_PROJECTS_DIR/overproj.yaml" 'name: overproj
+repo_path: /tmp
+ports:
+  reserved:
+    range: { min: 3000, max: 3005 }
+    slots: 11
+    services:
+      app: 0
+  dynamic:
+    range: { min: 4000, max: 5000 }'
+    run load_project_config "overproj"
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *"exceed the port range"* ]]
+}
+
+@test "load_project_config does not warn when single service fits the range" {
+    # Mirrors a valid super-gap config: 11 slots, 1 service, 3000-3011 range.
+    create_yaml_fixture "$WT_PROJECTS_DIR/okproj.yaml" 'name: okproj
+repo_path: /tmp
+ports:
+  reserved:
+    range: { min: 3000, max: 3011 }
+    slots: 11
+    services:
+      app: 0
+  dynamic:
+    range: { min: 4000, max: 5000 }'
+    run load_project_config "okproj"
+    [[ "$status" -eq 0 ]]
+    [[ "$output" != *"exceed the port range"* ]]
+}
+
 # --- get_setup_steps / get_setup_step ---
 
 @test "get_setup_steps returns count" {
@@ -457,4 +490,67 @@ FOO=bar
     [[ -d "$WT_DATA_DIR" ]]
     [[ -d "$WT_STATE_DIR" ]]
     [[ -d "$WT_LOG_DIR" ]]
+}
+
+# --- project_for_repo_path ---
+
+@test "project_for_repo_path matches a config by repo_path" {
+    create_yaml_fixture "$WT_PROJECTS_DIR/myproj.yaml" "name: myproj
+repo_path: /home/user/code/myproj"
+    result=$(project_for_repo_path "/home/user/code/myproj")
+    [[ "$result" == "myproj" ]]
+}
+
+@test "project_for_repo_path expands ~ in repo_path before matching" {
+    create_yaml_fixture "$WT_PROJECTS_DIR/homeproj.yaml" "name: homeproj
+repo_path: ~/code/homeproj"
+    result=$(project_for_repo_path "$HOME/code/homeproj")
+    [[ "$result" == "homeproj" ]]
+}
+
+@test "project_for_repo_path falls back to basename when a config exists" {
+    # Config name == basename, but repo_path points elsewhere
+    create_yaml_fixture "$WT_PROJECTS_DIR/widget.yaml" "name: widget
+repo_path: /elsewhere/entirely"
+    result=$(project_for_repo_path "/home/user/widget")
+    [[ "$result" == "widget" ]]
+}
+
+@test "project_for_repo_path returns empty when nothing matches" {
+    create_yaml_fixture "$WT_PROJECTS_DIR/other.yaml" "name: other
+repo_path: /some/other/repo"
+    result=$(project_for_repo_path "/no/such/project")
+    [[ -z "$result" ]]
+}
+
+@test "project_for_repo_path returns empty for empty input" {
+    result=$(project_for_repo_path "")
+    [[ -z "$result" ]]
+}
+
+# --- detect_project (state-authoritative main repo via git common dir) ---
+
+@test "detect_project resolves project from inside an external worktree" {
+    local repo ext
+    repo="$(cd "$TEST_TMPDIR" && pwd -P)/dp-repo"
+    git -C "$repo" init -b main >/dev/null 2>&1 || { mkdir -p "$repo" && git -C "$repo" init -b main >/dev/null 2>&1; }
+    git -C "$repo" config user.email t@t.co
+    git -C "$repo" config user.name t
+    touch "$repo/f"; git -C "$repo" add f; git -C "$repo" commit -qm init
+
+    create_yaml_fixture "$WT_PROJECTS_DIR/dp-repo.yaml" "name: dp-repo
+repo_path: $repo"
+
+    ext="$(cd "$TEST_TMPDIR" && pwd -P)/dp-ext"
+    git -C "$repo" worktree add "$ext" -b feat >/dev/null 2>&1
+
+    cd "$ext"
+    result=$(detect_project)
+    [[ "$result" == "dp-repo" ]]
+}
+
+@test "detect_project returns empty outside a git repo" {
+    cd "$TEST_TMPDIR"
+    result=$(detect_project)
+    [[ -z "$result" ]]
 }

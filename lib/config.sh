@@ -160,8 +160,14 @@ detect_project() {
     local repo_root
     repo_root=$(git_root 2>/dev/null) || { echo ""; return 0; }
 
-    # If we're inside a worktree, get the main repo path
-    if [[ "$repo_root" == *"/.worktrees/"* ]]; then
+    # Resolve the main repo for any linked worktree (Orca, .worktrees, external
+    # tools) via the shared git common dir: dirname(<main>/.git) == <main>.
+    # Falls back to the /.worktrees/ strip when git is too old for --path-format.
+    local common
+    common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+    if [[ -n "$common" ]]; then
+        repo_root=$(dirname "$common")
+    elif [[ "$repo_root" == *"/.worktrees/"* ]]; then
         repo_root="${repo_root%/.worktrees/*}"
     fi
 
@@ -192,6 +198,42 @@ detect_project() {
     return 0
 }
 
+# Resolve a project name from a main-repo path, independent of the CWD.
+# Used by `wt claim`/`wt release`, which know the main repo from the worktree's
+# git common dir rather than from where the command runs. Matches a config
+# whose repo_path equals the path, else falls back to the basename if a config
+# by that name exists. Echoes "" when nothing matches.
+project_for_repo_path() {
+    local main_repo="$1"
+
+    [[ -z "$main_repo" ]] && { echo ""; return 0; }
+
+    # Prefer an exact repo_path match
+    local config_file config_repo_path
+    for config_file in "$WT_PROJECTS_DIR"/*.yaml; do
+        [[ -f "$config_file" ]] || continue
+
+        config_repo_path=$(yaml_get "$config_file" ".repo_path" "")
+        config_repo_path=$(expand_path "$config_repo_path")
+
+        if [[ -n "$config_repo_path" ]] && [[ "$config_repo_path" == "$main_repo" ]]; then
+            basename "$config_file" .yaml
+            return 0
+        fi
+    done
+
+    # Fall back to the basename if a config by that name exists
+    local base
+    base=$(basename "$main_repo")
+    if has_project_config "$base"; then
+        echo "$base"
+        return 0
+    fi
+
+    echo ""
+    return 0
+}
+
 # Load project configuration
 # Sets PROJECT_* variables
 load_project_config() {
@@ -207,6 +249,7 @@ load_project_config() {
     PROJECT_NAME=$(yaml_get "$config_file" ".name" "$project")
     PROJECT_REPO_PATH=$(yaml_get "$config_file" ".repo_path")
     PROJECT_REPO_PATH=$(expand_path "$PROJECT_REPO_PATH")
+    # shellcheck disable=SC2034  # consumed by command modules that source this file
     PROJECT_CONFIG_FILE="$config_file"
 
     # Port configuration
@@ -234,6 +277,21 @@ load_project_config() {
     fi
     if (( PROJECT_DYNAMIC_PORT_MIN < 1 || PROJECT_DYNAMIC_PORT_MAX > 65535 )); then
         die "Dynamic port range out of bounds (must be 1-65535)"
+    fi
+
+    # Warn if the configured slot count can't fit within the reserved range.
+    # Each slot spans (highest service offset + 1) ports; the highest slot is
+    # slots-1, so its top port must stay within the range max. Catches configs
+    # where slots are over-provisioned and high slots would overshoot the range.
+    local _max_offset
+    _max_offset=$(yq -r '.ports.reserved.services // {} | to_entries | map(.value) | max // -1' "$config_file" 2>/dev/null)
+    [[ "$_max_offset" =~ ^-?[0-9]+$ ]] || _max_offset=-1
+    if (( _max_offset >= 0 )) && [[ "$PROJECT_RESERVED_SLOTS" =~ ^[0-9]+$ ]] && (( PROJECT_RESERVED_SLOTS > 0 )); then
+        local _per_slot=$((_max_offset + 1))
+        local _top_port=$(( PROJECT_RESERVED_PORT_MIN + (PROJECT_RESERVED_SLOTS - 1) * _per_slot + _max_offset ))
+        if (( _top_port > PROJECT_RESERVED_PORT_MAX )); then
+            log_warn "Reserved slots ($PROJECT_RESERVED_SLOTS) exceed the port range: highest slot needs port $_top_port but range max is $PROJECT_RESERVED_PORT_MAX. Reduce slots or widen ports.reserved.range."
+        fi
     fi
 
     log_debug "Loaded config for project: $PROJECT_NAME"

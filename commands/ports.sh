@@ -137,10 +137,6 @@ cmd_ports() {
     print_kv "Slot" "$slot"
     echo ""
 
-    # Check for any port overrides
-    local overrides
-    overrides=$(list_port_overrides "$project" "$branch" 2>/dev/null)
-
     # Reserved ports section
     local reserved_min
     reserved_min=$(yaml_get "$PROJECT_CONFIG_FILE" ".ports.reserved.range.min" "3000")

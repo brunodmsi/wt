@@ -89,8 +89,8 @@ cmd_start() {
     project=$(require_project "$project")
     load_project_config "$project"
 
-    # Verify worktree exists
-    if ! worktree_exists "$branch" "$PROJECT_REPO_PATH"; then
+    # Verify worktree exists (state-authoritative; covers claimed worktrees)
+    if ! worktree_dir_exists "$project" "$branch" "$PROJECT_REPO_PATH"; then
         die "Worktree not found for branch: $branch"
     fi
 
@@ -127,7 +127,8 @@ cmd_start() {
 
     # Run pre_start hook if defined
     export BRANCH_NAME="$branch"
-    export WORKTREE_PATH="$(get_worktree_path "$project" "$branch")"
+    WORKTREE_PATH="$(get_worktree_path "$project" "$branch")"
+    export WORKTREE_PATH
     run_hook "$PROJECT_CONFIG_FILE" "pre_start"
 
     # Start services
@@ -156,7 +157,8 @@ cmd_start() {
 
     # Run post_start hook if defined
     export BRANCH_NAME="$branch"
-    export WORKTREE_PATH="$(get_worktree_path "$project" "$branch")"
+    WORKTREE_PATH="$(get_worktree_path "$project" "$branch")"
+    export WORKTREE_PATH
     run_hook "$PROJECT_CONFIG_FILE" "post_start"
 
     # Optionally attach — tmux-only flow. Under herdr the user is already in

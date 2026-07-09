@@ -67,6 +67,19 @@ calculate_worktree_ports() {
     local reserved_services
     reserved_services=$(yq -r '.ports.reserved.services // {} | to_entries | .[] | "\(.key):\(.value)"' "$config_file" 2>/dev/null)
 
+    # Determine how many ports each slot spans: the highest service offset + 1,
+    # so adjacent slots never overlap. Derived from the config rather than
+    # assuming a fixed count — a single-service project spans 1 port per slot,
+    # not 2 (which would push high slots past the configured range max).
+    local services_per_slot
+    services_per_slot=$(yq -r '.ports.reserved.services // {} | to_entries | map(.value) | max // -1' "$config_file" 2>/dev/null)
+    if ! [[ "$services_per_slot" =~ ^-?[0-9]+$ ]]; then
+        services_per_slot=1
+    else
+        services_per_slot=$((services_per_slot + 1))
+    fi
+    (( services_per_slot < 1 )) && services_per_slot=1
+
     # Get dynamic services
     local dynamic_services
     dynamic_services=$(yq -r '.ports.dynamic.services // {} | keys | .[]' "$config_file" 2>/dev/null)
@@ -74,7 +87,7 @@ calculate_worktree_ports() {
     # Output reserved service ports
     while IFS=: read -r svc_name offset; do
         [[ -z "$svc_name" ]] && continue
-        svc_port=$(calculate_reserved_port "$slot" "$offset" "$reserved_base")
+        svc_port=$(calculate_reserved_port "$slot" "$offset" "$reserved_base" "$services_per_slot")
         echo "$svc_name:$svc_port"
     done <<< "$reserved_services"
 

@@ -104,7 +104,7 @@ cmd_logs() {
         local pane_info
         pane_info=$(list_window_panes "$tmux_session" "$window_name")
 
-        while IFS=: read -r idx active cmd size; do
+        while IFS=: read -r idx _ _ _; do
             [[ -z "$idx" ]] && continue
 
             # Try to resolve pane name from config

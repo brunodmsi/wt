@@ -72,7 +72,7 @@ cmd_restart() {
     project=$(require_project "$project")
     load_project_config "$project"
 
-    if ! worktree_exists "$branch" "$PROJECT_REPO_PATH"; then
+    if ! worktree_dir_exists "$project" "$branch" "$PROJECT_REPO_PATH"; then
         die "Worktree not found for branch: $branch"
     fi
 
@@ -83,7 +83,8 @@ cmd_restart() {
     export_port_vars "$branch" "$PROJECT_CONFIG_FILE" "$slot"
     export_env_vars "$PROJECT_CONFIG_FILE"
     export BRANCH_NAME="$branch"
-    export WORKTREE_PATH="$(get_worktree_path "$project" "$branch")"
+    WORKTREE_PATH="$(get_worktree_path "$project" "$branch")"
+    export WORKTREE_PATH
 
     # Resolve the list of services to restart
     local -a target_services=()

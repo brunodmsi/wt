@@ -1,5 +1,7 @@
 # wt - Git Worktree Manager
 
+[![CI](https://github.com/brunodmsi/wt/actions/workflows/ci.yml/badge.svg)](https://github.com/brunodmsi/wt/actions/workflows/ci.yml)
+
 A CLI tool for managing git worktrees with tmux integration, automatic port allocation, and per-project setup automation.
 
 ## Why?
@@ -127,6 +129,8 @@ wt delete feature/my-feature
 | Command | Alias | Description |
 |---------|-------|-------------|
 | `wt create <branch>` | `new` | Create worktree + run setup |
+| `wt claim [path]` | | Adopt an externally-created worktree (e.g. Orca) + run setup |
+| `wt release [path]` | `unclaim` | Drop a claimed worktree's state/slot (keeps the directory) |
 | `wt delete <branch>` | `rm` | Stop services, kill tmux, remove worktree |
 | `wt list` | `ls` | List all worktrees |
 | `wt start <branch> --all` | `up` | Start services |
@@ -234,6 +238,37 @@ Max 3 concurrent worktrees can use reserved ports. Dynamic services get determin
 - Set `WT_MULTIPLEXER=tmux|dmux|herdr|none` to override detection. Run `wt doctor` to see what's detected.
 - `jq` is required when running under herdr (response parsing for tab/pane lookups).
 
+## Adopting External Worktrees (`claim` / `release`)
+
+When another tool (e.g. [Orca](https://orca.computer)) creates the git worktree itself —
+often in its own directory outside `<repo>/.worktrees` — use `wt claim` to **adopt** it
+instead of `wt create`. Claiming registers state, allocates a port slot, and runs the
+project's setup steps so that `wt start`, `wt attach`, `wt status`, `wt ports`, `wt logs`,
+etc. all work on it exactly as if `wt create` had made it.
+
+```bash
+# Adopt an existing worktree (default path: current directory)
+wt claim ~/orca/workspaces/myapp/feature-x
+wt claim "$ORCA_WORKTREE_PATH"        # from an Orca setup hook
+
+# Drop the adoption when done — keeps the directory (the external tool owns it)
+wt release ~/orca/workspaces/myapp/feature-x
+wt release "$ORCA_WORKTREE_PATH"      # from an Orca archive hook
+```
+
+Path resolution is **state-authoritative**: `wt` records the worktree's real path and the
+main repo is resolved from the git common dir, so a claimed worktree can live anywhere.
+Project detection matches the config whose `repo_path` is the worktree's main repo (or
+falls back to its basename); override with `--project`. The branch defaults to the
+worktree's `HEAD` (override with `--branch`).
+
+`wt release` stops services, drops state and the port slot, but **never** runs
+`git worktree remove` — the tool that created the directory owns it.
+
+> **Orca hooks**: set the repo's setup hook to `wt claim "$ORCA_WORKTREE_PATH"` and its
+> archive hook to `wt release "$ORCA_WORKTREE_PATH"`. Ensure `wt` and its deps (`yq`,
+> `git`, `tmux`, …) are on `PATH` in Orca's spawned shell.
+
 ## Tmux Integration
 
 Once services are running in tmux, you can interact with panes directly:
@@ -274,7 +309,7 @@ Doctor checks: dependencies (with versions), YAML config validity, port range ov
 
 ## Tips
 
-- **Copy envs from main repo**: In setup steps, use `cp ../../../service/.env .env` to copy from the main repo's service directory
+- **Copy envs from main repo**: In setup steps, prefer `$MAIN_REPO` over `../..` so steps work whether the worktree lives in `<repo>/.worktrees` or was adopted via `wt claim` from elsewhere — e.g. `cp "${MAIN_REPO:-../..}/service/.env" .env`. `MAIN_REPO` is exported by both `wt create` and `wt claim` before setup runs.
 - **Check ports**: `wt ports <branch> --check` shows if ports are in use
 - **Custom tmux layout**: Use `layout: services-top` for services on top, main pane on bottom
 - **Skip setup**: `wt create <branch> --no-setup` to skip setup steps
