@@ -151,6 +151,10 @@ tmux:
 
 @test "start_service skips C-c when TMUX_PANE matches service pane" {
     export WT_LOG_DIR="$TEST_TMPDIR/logs"
+    # Force the tmux path so the test is hermetic: without this, a machine with
+    # a running herdr server (detect_multiplexer now finds one) routes to herdr
+    # and the tmux mock below is never called.
+    export WT_MULTIPLEXER="tmux"
 
     TMUX_LOG="$TEST_TMPDIR/tmux_calls.log"
     export TMUX_LOG
@@ -213,6 +217,9 @@ tmux:
 
 @test "start_service sends C-c when TMUX_PANE differs from service pane" {
     export WT_LOG_DIR="$TEST_TMPDIR/logs"
+    # Force the tmux path so the test is hermetic regardless of an ambient
+    # herdr server (see the matching note in the TMUX_PANE-matches test).
+    export WT_MULTIPLEXER="tmux"
 
     TMUX_LOG="$TEST_TMPDIR/tmux_calls2.log"
     export TMUX_LOG

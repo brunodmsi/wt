@@ -155,7 +155,7 @@ ensure_psmux_bash_shell() {
         log_success "Set psmux pane shell to Git Bash in ~/.tmux.conf"
         log_info "Run 'tmux kill-server' to restart psmux and apply (default-shell: $shell_win)"
     else
-        log_info "~/.tmux.conf already sets default-shell — left untouched."
+        log_info "Left ~/.tmux.conf untouched — it already sets default-shell."
     fi
     return 0
 }
