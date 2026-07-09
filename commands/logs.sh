@@ -185,7 +185,7 @@ _logs_from_files() {
 }
 
 show_logs_help() {
-    cat << 'EOF'
+    cat << 'EOF' | _wt_sub
 Usage: wt logs [branch] [service|pane_index] [options]
        wt logs [service|pane_index] [options]  (inside worktree)
 

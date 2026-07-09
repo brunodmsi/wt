@@ -126,7 +126,7 @@ cmd_delete() {
 }
 
 show_delete_help() {
-    cat << 'EOF'
+    cat << 'EOF' | _wt_sub
 Usage: wt delete <branch> [options]
 
 Delete a worktree and optionally the associated branch.

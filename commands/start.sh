@@ -174,7 +174,7 @@ cmd_start() {
 }
 
 show_start_help() {
-    cat << 'EOF'
+    cat << 'EOF' | _wt_sub
 Usage: wt start [service...] [options]
        wt start <branch> [service...] [options]
        wt start --all [options]

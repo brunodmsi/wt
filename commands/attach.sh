@@ -207,7 +207,7 @@ _attach_here_in_current_pane() {
 
 
 show_attach_help() {
-    cat << 'EOF'
+    cat << 'EOF' | _wt_sub
 Usage: wt attach <branch> [options]
 
 Attach to a worktree's multiplexer session.

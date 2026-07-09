@@ -69,6 +69,35 @@ teardown() {
     [ "$output" = "none" ]
 }
 
+@test "detect_multiplexer detects a running herdr server without HERDR_SOCKET_PATH" {
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/usr/bin/env bash
+# stub: emulate a reachable herdr server
+[[ "$1" == "status" ]] && { echo "status: running"; exit 0; }
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+    # No HERDR_SOCKET_PATH / TMUX (cleared in setup); herdr server wins.
+    PATH="$TEST_TMPDIR/bin:$PATH" run detect_multiplexer
+    [ "$status" -eq 0 ]
+    [ "$output" = "herdr" ]
+}
+
+@test "detect_multiplexer ignores herdr when no server is running" {
+    mkdir -p "$TEST_TMPDIR/bin"
+    cat > "$TEST_TMPDIR/bin/herdr" <<'EOF'
+#!/usr/bin/env bash
+# stub: server present but not running
+[[ "$1" == "status" ]] && { echo "status: not running"; exit 0; }
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/bin/herdr"
+    PATH="$TEST_TMPDIR/bin:$PATH" run detect_multiplexer
+    [ "$status" -eq 0 ]
+    [ "$output" != "herdr" ]
+}
+
 @test "multiplexer_open_tab with WT_MULTIPLEXER=none warns and succeeds" {
     export WT_MULTIPLEXER="none"
     run multiplexer_open_tab "branch-x" "/tmp/wt" "/tmp/cfg.yml" 0

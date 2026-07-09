@@ -23,6 +23,8 @@ When working on multiple features/branches simultaneously, constantly switching 
 
 ## Installation
 
+### macOS / Linux
+
 ```bash
 # Install dependencies
 brew install yq tmux
@@ -32,6 +34,70 @@ brew install yq tmux
 
 # Restart shell or source completions
 source ~/.zshrc  # or ~/.bashrc
+```
+
+### Windows (Git Bash / PowerShell) — the command is `gwt`
+
+The tool runs natively in **Git Bash** (the MSYS2 environment bundled with
+[Git for Windows](https://gitforwindows.org/)) and from **PowerShell**.
+Worktree management — `init`, `create`, `delete`, `list`, `status`, `ports`,
+`exec`, `run`, `config`, `doctor` — works without any extra setup.
+
+> **On Windows the command is `gwt`, not `wt`.** `wt` is already taken by
+> **Windows Terminal** (`wt.exe`), so typing `wt create …` would launch
+> Windows Terminal, not this tool. The installer therefore installs the
+> command as **`gwt`** and sets `WT_CMD=gwt` so all help and error text refers
+> to `gwt`. (You can choose any name — set `WT_CMD` to match.)
+
+> **tmux is not bundled with Git for Windows.** The service/session commands
+> (`start`, `stop`, `restart`, `attach`, `send`, `logs`, `panes`) require a
+> terminal multiplexer. Install **[psmux](https://github.com/psmux/psmux)** — a
+> native Windows tmux clone — for the full workflow without WSL:
+>
+> ```powershell
+> winget install psmux
+> ```
+>
+> psmux ships a `tmux` shim, so when the installer sees it, it adds
+> `set -g default-shell "C:\Program Files\Git\bin\bash.exe"` to your
+> `~/.tmux.conf`. That matters: psmux panes default to **PowerShell**, but `wt`
+> types **bash** commands into them, so pointing the pane shell at Git Bash is
+> what makes sessions/panes work. (Restart any running psmux server with
+> `tmux kill-server` after install to pick up the config.)
+>
+> `wt` auto-detects the active multiplexer at runtime — `herdr`, `dmux`, psmux's
+> `tmux` shim, or `none` — so [herdr](https://herdr.dev) works too when you run
+> `gwt` from inside a herdr pane (it also needs `jq`:
+> `winget install jqlang.jq`). With none installed, worktree management still
+> works and the session commands no-op.
+> [WSL2](https://learn.microsoft.com/windows/wsl/) remains an alternative, where
+> real tmux + bash run exactly as on Linux.
+
+```bash
+# 1. Install the one required dependency (yq). Pick one:
+winget install MikeFarah.yq
+#   scoop install yq
+#   choco install yq
+
+# 2. From a Git Bash shell, in the cloned repo:
+./install.sh
+```
+
+The installer detects Windows and, instead of a symlink (which needs elevated
+privileges), writes two launchers into your install dir (`~/bin` by default),
+both setting `WT_CMD=gwt` and leaving `WT_MULTIPLEXER` unset so `wt` auto-detects
+the active multiplexer at runtime (herdr / dmux / psmux / none):
+
+- `gwt`      — a Bash wrapper, used from **Git Bash**
+- `gwt.cmd`  — a shim so `gwt` also works from **PowerShell / cmd.exe**
+
+Make sure the install dir is on your `PATH`. Then, from PowerShell or Git Bash:
+
+```powershell
+cd C:\path\to\your-repo
+gwt init
+gwt create feature/my-feature --from main
+gwt list
 ```
 
 ## Quick Start

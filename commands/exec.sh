@@ -83,7 +83,7 @@ cmd_exec() {
 }
 
 show_exec_help() {
-    cat << 'EOF'
+    cat << 'EOF' | _wt_sub
 Usage: wt exec <branch> <command...>
 
 Execute a command in the context of a worktree.

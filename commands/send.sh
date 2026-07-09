@@ -97,7 +97,7 @@ cmd_send() {
 }
 
 show_send_help() {
-    cat << 'EOF'
+    cat << 'EOF' | _wt_sub
 Usage: wt send [branch] <service|pane_index> <command...>
        wt send <service|pane_index> <command...>  (inside worktree)
 

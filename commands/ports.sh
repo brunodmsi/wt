@@ -199,7 +199,7 @@ cmd_ports() {
 }
 
 show_ports_help() {
-    cat << 'EOF'
+    cat << 'EOF' | _wt_sub
 Usage: wt ports [branch] [options]
        wt ports set <service> <port> [branch] [options]
        wt ports clear <service> [branch] [options]
@@ -311,7 +311,7 @@ cmd_ports_set() {
 }
 
 show_ports_set_help() {
-    cat << 'EOF'
+    cat << 'EOF' | _wt_sub
 Usage: wt ports set <service> <port> [branch] [options]
 
 Set a port override for a service in a worktree.
@@ -395,7 +395,7 @@ cmd_ports_clear() {
 }
 
 show_ports_clear_help() {
-    cat << 'EOF'
+    cat << 'EOF' | _wt_sub
 Usage: wt ports clear <service> [branch] [options]
 
 Remove a port override for a service in a worktree.

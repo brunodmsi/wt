@@ -158,11 +158,11 @@ EOF
     echo "     \$EDITOR $config_file"
     echo ""
     echo "  2. Create your first worktree:"
-    echo "     wt create <branch-name>"
+    echo "     ${WT_CMD} create <branch-name>"
 }
 
 show_init_help() {
-    cat << 'EOF'
+    cat << 'EOF' | _wt_sub
 Usage: wt init [options]
 
 Initialize wt configuration for the current git repository.

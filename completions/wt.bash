@@ -199,4 +199,7 @@ _wt_completions() {
     esac
 }
 
-complete -F _wt_completions wt
+# Register for both names: "wt" everywhere, and "gwt" on Windows where the
+# launcher installs as gwt ("wt" is taken by Windows Terminal). Registering the
+# extra name is harmless on macOS/Linux, where gwt simply isn't a command.
+complete -F _wt_completions wt gwt

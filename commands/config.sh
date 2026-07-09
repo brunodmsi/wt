@@ -115,7 +115,7 @@ EOF
 }
 
 show_config_help() {
-    cat << 'EOF'
+    cat << 'EOF' | _wt_sub
 Usage: wt config [options] [project]
 
 View or edit wt configuration.

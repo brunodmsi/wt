@@ -107,7 +107,9 @@ cmd_status() {
 
         # Ahead/behind info
         local tracking
-        tracking=$(echo "$git_status" | grep '^# branch.upstream' | cut -d' ' -f3)
+        # `grep` returns non-zero when there's no upstream line; guard so the
+        # command substitution doesn't trip `set -e`.
+        tracking=$(echo "$git_status" | grep '^# branch.upstream' | cut -d' ' -f3 || true)
         if [[ -n "$tracking" ]]; then
             local ab_line
             ab_line=$(echo "$git_status" | grep '^# branch.ab')
@@ -163,7 +165,7 @@ cmd_status() {
 }
 
 show_status_help() {
-    cat << 'EOF'
+    cat << 'EOF' | _wt_sub
 Usage: wt status <branch> [options]
 
 Show detailed status of a worktree.

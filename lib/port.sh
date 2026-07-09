@@ -21,7 +21,7 @@ calculate_dynamic_port() {
         local attempts=0
         while [[ " $used_ports " == *" $port "* ]] && (( attempts < range )); do
             port=$(( port_min + ((port - port_min + 1) % range) ))
-            ((attempts++))
+            attempts=$((attempts + 1))
         done
     fi
 

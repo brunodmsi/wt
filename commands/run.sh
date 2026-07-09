@@ -68,7 +68,7 @@ cmd_run() {
 }
 
 show_run_help() {
-    cat << 'EOF'
+    cat << 'EOF' | _wt_sub
 Usage: wt run <branch> <step-name>
 
 Run a specific setup step in a worktree.

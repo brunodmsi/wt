@@ -126,6 +126,10 @@ hooks:
     _create_test_config "testproj"
     create_worktree_state "testproj" "feature/test" "$TEST_REPO/.worktrees/feature-test" 0
     run cmd_list -p "testproj" 2>&1
+    # Note: these unit tests don't enable `set -e` (only wt.sh does), so the
+    # exit-code regression for `((count++))` lives in test_windows.bats, which
+    # drives wt.sh as a subprocess. This still guards basic success.
+    [[ "$status" -eq 0 ]]
     [[ "$output" == *"feature"* ]]
 }
 
