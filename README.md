@@ -25,15 +25,30 @@ When working on multiple features/branches simultaneously, constantly switching 
 
 ### macOS / Linux
 
+**One-liner** (clones to `~/.local/share/wt/src` and installs the `wt` launcher):
+
 ```bash
-# Install dependencies
+# Dependency: yq (tmux optional, for service/session commands)
 brew install yq tmux
 
-# Run installer
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/brunodmsi/wt/main/install.sh | bash
 
 # Restart shell or source completions
 source ~/.zshrc  # or ~/.bashrc
+```
+
+**From a clone** (for development or if you'd rather manage the checkout yourself):
+
+```bash
+git clone https://github.com/brunodmsi/wt.git && cd wt
+./install.sh
+```
+
+Either way the launcher points at a live git checkout, so updating is one command:
+
+```bash
+wt update            # fast-forward to the latest version
+wt update --check    # see if an update is available without applying it
 ```
 
 ### Windows (Git Bash / PowerShell) — the command is `gwt`
@@ -79,9 +94,12 @@ winget install MikeFarah.yq
 #   scoop install yq
 #   choco install yq
 
-# 2. From a Git Bash shell, in the cloned repo:
-./install.sh
+# 2. From a Git Bash shell — the one-liner works here too:
+curl -fsSL https://raw.githubusercontent.com/brunodmsi/wt/main/install.sh | bash
+#   or, from a cloned repo: ./install.sh
 ```
+
+Update later with `gwt update` (or `gwt update --check`).
 
 The installer detects Windows and, instead of a symlink (which needs elevated
 privileges), writes two launchers into your install dir (`~/bin` by default),
@@ -143,6 +161,7 @@ wt delete feature/my-feature
 | `wt ports <branch>` | | Show port assignments |
 | `wt doctor` | `doc` | Run diagnostic checks |
 | `wt config --edit` | | Edit project config |
+| `wt update` | `upgrade` | Update wt to the latest version |
 
 ## Configuration
 

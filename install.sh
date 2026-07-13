@@ -11,7 +11,17 @@ BLUE='\033[0;34m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# BASH_SOURCE[0] is unset when the script is piped (curl | bash), and `set -u`
+# would abort on a bare reference — default it so SCRIPT_DIR resolves to the
+# current directory in that case (no wt.sh there triggers the bootstrap clone).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)"
+
+# Where a bootstrap install (curl | bash) keeps its managed source checkout.
+# Sits next to the state/ dir the tool already uses under XDG_DATA_HOME, so
+# `wt update` can fast-forward it later. Overridable for tests / forks.
+WT_SRC_DIR="${WT_SRC_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/wt/src}"
+WT_REPO_URL="${WT_REPO_URL:-https://github.com/brunodmsi/wt.git}"
+WT_REPO_BRANCH="${WT_REPO_BRANCH:-main}"
 
 log_info() {
     echo -e "${BLUE}[INFO]${NC} $*"
@@ -84,6 +94,37 @@ check_dependencies() {
             echo "  - $dep ($(dep_install_hint "$dep"))"
         done
     fi
+}
+
+# Resolve the source tree to install from.
+#
+# Run from a checkout (git clone + ./install.sh), there's a wt.sh next to us —
+# install that in place, exactly as before. Piped (curl | bash), there's no
+# wt.sh alongside the script, so clone/refresh a managed checkout at
+# WT_SRC_DIR and install from there. Either way SCRIPT_DIR ends up pointing at
+# a real tree, and the launcher/symlink and completions reference a stable path.
+ensure_source() {
+    if [[ -f "$SCRIPT_DIR/wt.sh" ]]; then
+        return 0
+    fi
+
+    if ! command -v git &>/dev/null; then
+        log_error "git is required to bootstrap the install ($(dep_install_hint git))"
+        exit 1
+    fi
+
+    if [[ -d "$WT_SRC_DIR/.git" ]]; then
+        log_info "Updating existing source at $WT_SRC_DIR"
+        git -C "$WT_SRC_DIR" fetch --quiet origin "$WT_REPO_BRANCH"
+        git -C "$WT_SRC_DIR" checkout --quiet "$WT_REPO_BRANCH"
+        git -C "$WT_SRC_DIR" reset --hard --quiet "origin/$WT_REPO_BRANCH"
+    else
+        log_info "Cloning wt to $WT_SRC_DIR"
+        mkdir -p "$(dirname "$WT_SRC_DIR")"
+        git clone --quiet --branch "$WT_REPO_BRANCH" "$WT_REPO_URL" "$WT_SRC_DIR"
+    fi
+
+    SCRIPT_DIR="$WT_SRC_DIR"
 }
 
 # Make scripts executable
@@ -363,6 +404,7 @@ main() {
 
     # Run installation steps
     check_dependencies
+    ensure_source
     make_executable
     create_launcher "$install_dir"
 
@@ -389,8 +431,9 @@ main() {
     echo ""
 }
 
-# Only run the installer when executed directly; sourcing (e.g. from tests)
-# exposes the helper functions without performing an install.
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+# Run the installer when executed directly (BASH_SOURCE[0] == $0) or piped
+# (curl | bash — BASH_SOURCE[0] is unset). Skip it only when sourced, e.g. from
+# tests, where BASH_SOURCE[0] is set to this file's path but differs from $0.
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
 fi

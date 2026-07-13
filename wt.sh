@@ -48,6 +48,7 @@ source "${WT_SCRIPT_DIR}/commands/send.sh"
 source "${WT_SCRIPT_DIR}/commands/logs.sh"
 source "${WT_SCRIPT_DIR}/commands/panes.sh"
 source "${WT_SCRIPT_DIR}/commands/doctor.sh"
+source "${WT_SCRIPT_DIR}/commands/update.sh"
 
 # Show help
 show_help() {
@@ -82,6 +83,7 @@ ${BOLD}COMMANDS${NC}
     exec            Execute command in worktree
     ports           Show port assignments
     doctor, doc     Run diagnostic checks
+    update          Update wt to the latest version
 
     ${CYAN}Configuration${NC}
     init            Initialize project configuration
@@ -120,9 +122,23 @@ For more information on a command, run:
 " | _wt_sub
 }
 
+# Compute the version string. When wt runs from a git checkout (the default
+# install), append `git describe` output so `--version` reflects exactly what's
+# installed; otherwise fall back to the baked-in VERSION constant. Robust when
+# git is absent — the guard fails and we return the constant.
+wt_version() {
+    local v="$VERSION"
+    if git -C "$WT_SCRIPT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+        local desc
+        desc="$(git -C "$WT_SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null || true)"
+        [[ -n "$desc" ]] && v="$VERSION ($desc)"
+    fi
+    echo "$v"
+}
+
 # Show version
 show_version() {
-    echo "$WT_CMD version $VERSION"
+    echo "$WT_CMD version $(wt_version)"
 }
 
 # Check dependencies
@@ -240,6 +256,9 @@ main() {
             ;;
         doctor|doc)
             cmd_doctor "$@"
+            ;;
+        update|upgrade)
+            cmd_update "$@"
             ;;
         *)
             log_error "Unknown command: $command"
