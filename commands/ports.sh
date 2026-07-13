@@ -137,20 +137,28 @@ cmd_ports() {
     print_kv "Slot" "$slot"
     echo ""
 
-    # Reserved ports section
-    local reserved_min
-    reserved_min=$(yaml_get "$PROJECT_CONFIG_FILE" ".ports.reserved.range.min" "3000")
+    # Compute the authoritative port map once. Both tables below look ports up
+    # from this map, so the displayed values can never diverge from what
+    # `wt start`/setup use — all three derive from calculate_worktree_ports.
+    # (Previously the reserved table re-derived ports via calculate_reserved_port
+    # with a hardcoded services_per_slot=2, over-reporting by one slot's worth
+    # for single-service projects: slot 1 showed 3002 while everything real used
+    # 3001. Reading the map also picks up dynamic collision-avoidance, which the
+    # old per-service calculate_dynamic_port call ignored.)
+    local port_map
+    port_map=$(calculate_worktree_ports "$branch" "$PROJECT_CONFIG_FILE" "$slot")
 
+    # Reserved ports section
     local reserved_services
-    reserved_services=$(yq -r '.ports.reserved.services // {} | to_entries | .[] | "\(.key):\(.value)"' "$PROJECT_CONFIG_FILE" 2>/dev/null)
+    reserved_services=$(yq -r '.ports.reserved.services // {} | keys | .[]' "$PROJECT_CONFIG_FILE" 2>/dev/null)
 
     if [[ -n "$reserved_services" ]]; then
         _ports_table_header "Reserved Ports (Slot $slot)" "$check_availability"
 
-        while IFS=: read -r service offset; do
+        while read -r service; do
             [[ -z "$service" ]] && continue
             local port
-            port=$(calculate_reserved_port "$slot" "$offset" "$reserved_min")
+            port=$(echo "$port_map" | grep "^${service}:" | cut -d: -f2)
             _ports_table_row "$service" "$port" "$project" "$branch" "$check_availability"
         done <<< "$reserved_services"
         echo ""
@@ -163,16 +171,10 @@ cmd_ports() {
     if [[ -n "$dynamic_services" ]]; then
         _ports_table_header "Dynamic Ports" "$check_availability"
 
-        local dynamic_min
-        dynamic_min=$(yaml_get "$PROJECT_CONFIG_FILE" ".ports.dynamic.range.min" "4000")
-
-        local dynamic_max
-        dynamic_max=$(yaml_get "$PROJECT_CONFIG_FILE" ".ports.dynamic.range.max" "5000")
-
         while read -r service; do
             [[ -z "$service" ]] && continue
             local port
-            port=$(calculate_dynamic_port "$branch" "$dynamic_min" "$dynamic_max")
+            port=$(echo "$port_map" | grep "^${service}:" | cut -d: -f2)
             _ports_table_row "$service" "$port" "$project" "$branch" "$check_availability"
         done <<< "$dynamic_services"
         echo ""
@@ -193,7 +195,7 @@ cmd_ports() {
         local effective_port="${override:-$port}"
 
         echo "export $var_name=$effective_port"
-    done < <(calculate_worktree_ports "$branch" "$PROJECT_CONFIG_FILE" "$slot")
+    done <<< "$port_map"
 
     echo ""
 }

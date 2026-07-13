@@ -7,6 +7,7 @@ setup() {
     setup_test_dirs
     load_lib "utils"
     load_lib "config"
+    load_lib "state"
     load_lib "setup"
 
     # Create a fake worktree directory
@@ -167,6 +168,158 @@ teardown() {
     execute_setup "$WORKTREE_PATH" "$TEST_TMPDIR/config.yaml" "step2" 2>/dev/null
     [[ ! -f "$WORKTREE_PATH/step1.done" ]]
     [[ -f "$WORKTREE_PATH/step2.done" ]]
+}
+
+# --- execute_setup: phase filter (used by `wt repair`) ---
+
+@test "execute_setup phase filter runs only steps in that phase" {
+    create_yaml_fixture "$TEST_TMPDIR/config.yaml" 'setup:
+  - name: build-step
+    command: touch build.done
+    working_dir: .
+  - name: provision-step
+    command: touch provision.done
+    working_dir: .
+    phase: provision'
+
+    execute_setup "$WORKTREE_PATH" "$TEST_TMPDIR/config.yaml" "" "provision" 2>/dev/null
+    [[ ! -f "$WORKTREE_PATH/build.done" ]]
+    [[ -f "$WORKTREE_PATH/provision.done" ]]
+}
+
+@test "execute_setup phase filter ignores depends_on across phases" {
+    # provision-step depends on a build-phase step that the phase filter skips;
+    # it must still run (deps are not enforced under a phase filter).
+    create_yaml_fixture "$TEST_TMPDIR/config.yaml" 'setup:
+  - name: heavy-build
+    command: touch build.done
+    working_dir: .
+  - name: provision-step
+    command: touch provision.done
+    working_dir: .
+    phase: provision
+    depends_on:
+      - heavy-build'
+
+    execute_setup "$WORKTREE_PATH" "$TEST_TMPDIR/config.yaml" "" "provision" 2>/dev/null
+    [[ ! -f "$WORKTREE_PATH/build.done" ]]
+    [[ -f "$WORKTREE_PATH/provision.done" ]]
+}
+
+# --- get_setup_requires / setup_requires_missing ---
+
+@test "get_setup_requires reads declared artifact paths" {
+    create_yaml_fixture "$TEST_TMPDIR/config.yaml" 'setup_requires:
+  - app/.env
+  - indexer/.env'
+
+    run get_setup_requires "$TEST_TMPDIR/config.yaml"
+    [[ "$output" == *"app/.env"* ]]
+    [[ "$output" == *"indexer/.env"* ]]
+}
+
+@test "get_setup_requires is empty when none declared" {
+    create_yaml_fixture "$TEST_TMPDIR/config.yaml" 'name: test'
+    result=$(get_setup_requires "$TEST_TMPDIR/config.yaml" | tr -d '[:space:]')
+    [[ -z "$result" ]]
+}
+
+@test "setup_requires_missing returns 0 when all artifacts present" {
+    create_yaml_fixture "$TEST_TMPDIR/config.yaml" 'setup_requires:
+  - present.env'
+    touch "$WORKTREE_PATH/present.env"
+
+    run setup_requires_missing "$WORKTREE_PATH" "$TEST_TMPDIR/config.yaml"
+    [[ "$status" -eq 0 ]]
+}
+
+@test "setup_requires_missing returns 0 when none declared" {
+    create_yaml_fixture "$TEST_TMPDIR/config.yaml" 'name: test'
+    run setup_requires_missing "$WORKTREE_PATH" "$TEST_TMPDIR/config.yaml"
+    [[ "$status" -eq 0 ]]
+}
+
+@test "setup_requires_missing lists missing artifacts and fails" {
+    create_yaml_fixture "$TEST_TMPDIR/config.yaml" 'setup_requires:
+  - here.env
+  - gone.env'
+    touch "$WORKTREE_PATH/here.env"
+
+    run setup_requires_missing "$WORKTREE_PATH" "$TEST_TMPDIR/config.yaml"
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"gone.env"* ]]
+    [[ "$output" != *"here.env"* ]]
+}
+
+# --- finalize_provisioning ---
+
+@test "finalize_provisioning records ok when setup passed and artifacts present" {
+    create_yaml_fixture "$TEST_TMPDIR/config.yaml" 'setup_requires:
+  - app.env'
+    touch "$WORKTREE_PATH/app.env"
+
+    run finalize_provisioning "proj" "br" "$WORKTREE_PATH" "$TEST_TMPDIR/config.yaml" 0
+    [[ "$status" -eq 0 ]]
+    [[ "$(get_worktree_state "proj" "br" "provisioned")" == "ok" ]]
+}
+
+@test "finalize_provisioning records incomplete when a step failed" {
+    create_yaml_fixture "$TEST_TMPDIR/config.yaml" 'name: test'
+    # setup_rc=1 (a step failed) even though no artifacts are declared
+    run finalize_provisioning "proj" "br" "$WORKTREE_PATH" "$TEST_TMPDIR/config.yaml" 1
+    [[ "$status" -ne 0 ]]
+    [[ "$(get_worktree_state "proj" "br" "provisioned")" == "incomplete" ]]
+}
+
+@test "finalize_provisioning records incomplete when a required artifact is absent" {
+    create_yaml_fixture "$TEST_TMPDIR/config.yaml" 'setup_requires:
+  - app.env'
+    # steps "passed" (rc=0) but the artifact isn't there
+    run finalize_provisioning "proj" "br" "$WORKTREE_PATH" "$TEST_TMPDIR/config.yaml" 0
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"app.env"* ]]
+    [[ "$(get_worktree_state "proj" "br" "provisioned")" == "incomplete" ]]
+}
+
+# --- assert_provisioned (wt start preflight guard) ---
+
+@test "assert_provisioned passes when required artifacts present" {
+    create_yaml_fixture "$TEST_TMPDIR/config.yaml" 'setup_requires:
+  - app.env'
+    touch "$WORKTREE_PATH/app.env"
+    run assert_provisioned "proj" "br" "$WORKTREE_PATH" "$TEST_TMPDIR/config.yaml"
+    [[ "$status" -eq 0 ]]
+}
+
+@test "assert_provisioned fails and names the missing artifact" {
+    create_yaml_fixture "$TEST_TMPDIR/config.yaml" 'setup_requires:
+  - app.env'
+    run assert_provisioned "proj" "br" "$WORKTREE_PATH" "$TEST_TMPDIR/config.yaml"
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"app.env"* ]]
+}
+
+# Artifacts are authoritative: a file deleted after a clean provision is caught
+# even though the state key still says ok.
+@test "assert_provisioned catches a deleted artifact despite provisioned=ok state" {
+    create_yaml_fixture "$TEST_TMPDIR/config.yaml" 'setup_requires:
+  - app.env'
+    set_worktree_state "proj" "br" "provisioned" "ok"
+    run assert_provisioned "proj" "br" "$WORKTREE_PATH" "$TEST_TMPDIR/config.yaml"
+    [[ "$status" -ne 0 ]]
+}
+
+@test "assert_provisioned falls back to provisioned state key when nothing declared" {
+    create_yaml_fixture "$TEST_TMPDIR/config.yaml" 'name: test'
+    set_worktree_state "proj" "br" "provisioned" "incomplete"
+    run assert_provisioned "proj" "br" "$WORKTREE_PATH" "$TEST_TMPDIR/config.yaml"
+    [[ "$status" -ne 0 ]]
+}
+
+@test "assert_provisioned is OK for a legacy worktree (nothing declared, state unset)" {
+    create_yaml_fixture "$TEST_TMPDIR/config.yaml" 'name: test'
+    run assert_provisioned "proj" "br" "$WORKTREE_PATH" "$TEST_TMPDIR/config.yaml"
+    [[ "$status" -eq 0 ]]
 }
 
 @test "execute_setup shows summary" {

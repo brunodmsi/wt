@@ -31,6 +31,7 @@ source "${WT_SCRIPT_DIR}/lib/service.sh"
 # Source command modules
 source "${WT_SCRIPT_DIR}/commands/create.sh"
 source "${WT_SCRIPT_DIR}/commands/claim.sh"
+source "${WT_SCRIPT_DIR}/commands/repair.sh"
 source "${WT_SCRIPT_DIR}/commands/release.sh"
 source "${WT_SCRIPT_DIR}/commands/delete.sh"
 source "${WT_SCRIPT_DIR}/commands/list.sh"
@@ -60,6 +61,7 @@ ${BOLD}COMMANDS${NC}
     ${CYAN}Worktree Management${NC}
     create, new     Create a new worktree
     claim           Adopt an externally-created worktree
+    repair          Re-run safe provisioning steps for a worktree
     release, unclaim Drop a claimed worktree (keeps the directory)
     delete, rm      Delete a worktree
     list, ls        List all worktrees
@@ -189,6 +191,9 @@ main() {
             ;;
         claim)
             cmd_claim "$@"
+            ;;
+        repair)
+            cmd_repair "$@"
             ;;
         release|unclaim)
             cmd_release "$@"

@@ -138,16 +138,18 @@ cmd_create() {
     export MAIN_REPO="$repo_root"
 
     # Run setup steps
-    local setup_failed=0
+    local setup_rc=0
     if [[ "$no_setup" -eq 0 ]]; then
         echo ""
-        if ! execute_setup "$wt_path" "$PROJECT_CONFIG_FILE"; then
-            log_warn "Setup completed with errors"
-            setup_failed=1
-        fi
+        execute_setup "$wt_path" "$PROJECT_CONFIG_FILE" || setup_rc=1
     else
         log_info "Skipping setup (--no-setup)"
     fi
+
+    # Record provisioning status: ok only when setup succeeded AND every declared
+    # setup_requires artifact is present (Defect A: catch silently-broken setup).
+    local setup_failed=0
+    finalize_provisioning "$project" "$branch" "$wt_path" "$PROJECT_CONFIG_FILE" "$setup_rc" || setup_failed=1
 
     # Create tmux window in the main session
     echo ""
@@ -171,7 +173,7 @@ cmd_create() {
 
     echo ""
     if [[ "$setup_failed" -eq 1 ]]; then
-        log_warn "Worktree created but setup had errors. You may need to run setup manually."
+        log_warn "Worktree created but setup is INCOMPLETE — services would start misconfigured."
     else
         log_success "Worktree ready!"
     fi
@@ -186,6 +188,15 @@ cmd_create() {
         print_kv "Session" "$mux_label:$window_name"
     fi
     echo ""
+
+    # Fail loudly (non-zero exit) on an incomplete setup so callers/scripts can
+    # detect it. The worktree is kept registered for `wt status` / `wt repair`.
+    if [[ "$setup_failed" -eq 1 ]]; then
+        echo "Repair with:"
+        echo "  ${WT_CMD} repair $branch     # re-run safe provisioning steps"
+        return 2
+    fi
+
     echo "Next steps:"
     echo "  ${WT_CMD} start $branch --all    # Start all services"
     echo "  ${WT_CMD} attach $branch         # Attach to tmux"

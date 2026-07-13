@@ -134,6 +134,74 @@ _require_yq() {
     [[ "$status" -eq 0 ]]
 }
 
+# --- Defect A: setup-integrity exit codes (subprocess so set -e is active) ---
+
+# A project whose setup aborts before it can create the required .env; a safe
+# provision-phase step can recreate it (used by wt repair).
+_create_integrity_project() {
+    create_yaml_fixture "$WT_PROJECTS_DIR/integ.yaml" "name: integ
+repo_path: $TEST_REPO
+ports:
+  reserved: { range: { min: 3000, max: 3010 }, slots: 3, services: { web: 0 } }
+  dynamic: { range: { min: 4000, max: 5000 }, services: {} }
+services:
+  - name: web
+    command: echo running
+    working_dir: .
+    port_key: web
+setup:
+  - name: will-abort
+    command: exit 1
+    working_dir: .
+    on_failure: abort
+  - name: provision-env
+    command: touch .env
+    working_dir: .
+    phase: provision
+setup_requires:
+  - .env
+tmux:
+  layout: tiled"
+}
+
+@test "e2e: wt claim exits 2 on incomplete setup and keeps the worktree registered" {
+    _require_yq
+    local ext="$TEST_TMPDIR/ext-integ"
+    git -C "$TEST_REPO" worktree add "$ext" -b feature/integ >/dev/null 2>&1
+    _create_integrity_project
+
+    run bash "$WT" claim "$ext" -p integ
+    [[ "$status" -eq 2 ]]
+    [[ "$output" == *"INCOMPLETE"* ]]
+    # State survives so `wt status`/`wt repair` can see it (not silently released)
+    run bash "$WT" status feature/integ -p integ
+    [[ "$status" -eq 0 ]]
+}
+
+@test "e2e: wt start refuses an incomplete worktree, then wt repair fixes it" {
+    _require_yq
+    local ext="$TEST_TMPDIR/ext-repair"
+    git -C "$TEST_REPO" worktree add "$ext" -b feature/rep >/dev/null 2>&1
+    _create_integrity_project
+
+    # claim leaves it incomplete: the abort means .env is never created
+    bash "$WT" claim "$ext" -p integ >/dev/null 2>&1 || true
+
+    # start must refuse and launch nothing
+    run bash "$WT" start feature/rep --all -p integ
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"repair"* ]]
+
+    # repair runs only the safe provision step, recreates .env, and exits 0
+    run bash "$WT" repair feature/rep -p integ
+    [[ "$status" -eq 0 ]]
+    [[ -f "$ext/.env" ]]
+
+    # start now succeeds
+    run bash "$WT" start feature/rep --all -p integ
+    [[ "$status" -eq 0 ]]
+}
+
 @test "e2e: WT_CMD customizes the command name in output (gwt on Windows)" {
     run env WT_CMD=gwt bash "$WT" --version
     [[ "$status" -eq 0 ]]

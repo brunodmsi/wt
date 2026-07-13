@@ -145,6 +145,7 @@ The `setup` section defines steps executed during `wt create`. Steps run sequent
 | `on_failure` | string | No | `abort` | Action on failure: `abort`, `continue`, or `retry` |
 | `condition` | string | No | - | Shell condition; step skipped if exits non-zero |
 | `env` | object | No | `{}` | Step-specific environment variables |
+| `phase` | string | No | - | Grouping tag. Steps tagged `phase: provision` are the safe, idempotent subset that `wt repair` re-runs (see [Setup integrity](#setup-integrity-required-artifacts--wt-repair)) |
 
 #### on_failure Options
 
@@ -206,6 +207,84 @@ setup:
   - name: copy-env
     command: cp "${MAIN_REPO:-../..}/backend/.env" .env
 ```
+
+---
+
+### Setup integrity: required artifacts & `wt repair`
+
+By default a setup step that fails (`on_failure: abort`) stops the run, and a step
+can also "succeed" while silently failing to produce the file it was supposed to
+create. Either way you can end up with a worktree that looks set up but starts its
+services against missing config. Two config features make that failure visible and
+recoverable.
+
+#### `setup_requires` — declare the artifacts setup must produce
+
+`setup_requires` is a **top-level** list (a sibling of `setup:`, which is a step
+list and therefore can't nest a `.requires` key) of paths, relative to the worktree
+root, that must exist for the worktree to be considered provisioned.
+
+```yaml
+setup_requires:
+  - gap-app-v2/.env
+  - gap-indexer/.env
+```
+
+After `wt create` / `wt claim` run setup, every declared path is checked. A missing
+path — even when every step reported success — marks the worktree
+`provisioned: incomplete`, prints which files are missing, and makes the command
+**exit non-zero (2)**. The worktree stays registered (so `wt status` and `wt repair`
+can see it); it is not silently released.
+
+`wt start` runs the same check as a **preflight**: if `setup_requires` is declared it
+asserts each file is present (this also catches a file deleted after a clean setup);
+otherwise it consults the recorded `provisioned` status. If the worktree is
+incomplete, `wt start` refuses to launch anything and points you at `wt repair`.
+Worktrees created before this feature (no declared artifacts, no recorded status)
+start normally.
+
+`setup_requires` is fully backward-compatible: omit it and no artifact checks run.
+
+#### `phase: provision` — mark the steps `wt repair` may re-run
+
+Tag the safe, **idempotent** provisioning steps (env/config file copies, port
+stamping — anything that can run repeatedly without side effects) with
+`phase: provision`. `wt repair` re-runs *only* these steps. Steps that move
+submodule branches, install dependencies, or delete `node_modules` must be left
+untagged so repair never touches them.
+
+Because a phase-filtered run executes a subset, `depends_on` is **not** enforced
+under `wt repair` — a `phase: provision` step must be self-contained (it must not
+rely on an untagged build/install step having just run).
+
+```yaml
+setup:
+  - name: install-deps          # untagged: repair never re-runs this
+    command: pnpm install
+    on_failure: abort
+
+  - name: setup-env             # safe to re-run: repair re-runs this
+    command: cp "${MAIN_REPO}/gap-app-v2/.env" gap-app-v2/.env
+    phase: provision
+
+setup_requires:
+  - gap-app-v2/.env
+```
+
+#### `wt repair`
+
+```bash
+wt repair [branch]              # auto-detects the branch inside a worktree
+wt repair feature/auth
+```
+
+`wt repair` re-provisions an already-registered worktree without disturbing your
+work. It re-exports the port/env variables for the recorded slot, re-runs only the
+`phase: provision` steps, re-verifies `setup_requires`, and updates the `provisioned`
+status. It never checks out branches, reinstalls dependencies, or deletes
+`node_modules`, so it is safe on a worktree whose submodules sit on a feature branch
+with local changes. It exits non-zero if a required artifact still can't be produced
+(e.g. no `phase: provision` step creates it).
 
 ---
 
@@ -698,8 +777,9 @@ Checks performed:
 
 1. **Port conflicts**: Use `wt ports <branch> --check` to verify ports before starting
 2. **Re-run setup**: Use `wt run <branch> <step-name>` to re-run a specific setup step
-3. **Skip setup**: Use `wt create <branch> --no-setup` to create without running setup
-4. **Debug**: Set `WT_DEBUG=1` for verbose logging
-5. **Submodules**: Reference parent repo with `../../` in setup commands (worktrees are in `.worktrees/<branch>/`)
-6. **Diagnose issues**: Run `wt doctor` to check config validity, state consistency, and tmux health
-7. **Debug panes**: Use `wt logs <branch> --all` to see output from all tmux panes at once
+3. **Repair a half-configured worktree**: Use `wt repair <branch>` to safely re-run only the `phase: provision` steps (see [Setup integrity](#setup-integrity-required-artifacts--wt-repair)) — it never touches submodule branches or dependencies
+4. **Skip setup**: Use `wt create <branch> --no-setup` to create without running setup
+5. **Debug**: Set `WT_DEBUG=1` for verbose logging
+6. **Submodules**: Reference parent repo with `../../` in setup commands (worktrees are in `.worktrees/<branch>/`)
+7. **Diagnose issues**: Run `wt doctor` to check config validity, state consistency, and tmux health
+8. **Debug panes**: Use `wt logs <branch> --all` to see output from all tmux panes at once

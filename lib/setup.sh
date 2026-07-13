@@ -5,7 +5,10 @@
 execute_setup() {
     local worktree_path="$1"
     local config_file="$2"
-    local step_filter="${3:-}"  # Optional: run only specific step
+    local step_filter="${3:-}"  # Optional: run only a specific step (by name)
+    local phase_filter="${4:-}" # Optional: run only steps whose `phase` matches
+                                # (used by `wt repair` to run just the safe,
+                                # idempotent provisioning steps)
 
     local step_count
     step_count=$(get_setup_steps "$config_file")
@@ -43,36 +46,49 @@ execute_setup() {
         local condition
         condition=$(get_setup_step "$config_file" "$i" "condition")
 
-        # Skip if filter provided and doesn't match
+        local step_phase
+        step_phase=$(get_setup_step "$config_file" "$i" "phase")
+
+        # Skip if step filter provided and doesn't match
         if [[ -n "$step_filter" ]] && [[ "$step_name" != "$step_filter" ]]; then
             continue
         fi
 
-        # Check dependencies
-        local deps_met=true
-        local deps
-        deps=$(yq -r ".setup[$i].depends_on // [] | .[]" "$config_file" 2>/dev/null)
+        # Skip if phase filter provided and this step isn't in that phase
+        if [[ -n "$phase_filter" ]] && [[ "$step_phase" != "$phase_filter" ]]; then
+            continue
+        fi
 
-        while read -r dep; do
-            [[ -z "$dep" ]] && continue
-            local found=false
-            for c in "${completed[@]}"; do
-                if [[ "$c" == "$dep" ]]; then
-                    found=true
+        # Check dependencies. Skipped under a phase filter: a phase-filtered run
+        # (e.g. `wt repair`) deliberately runs a subset, so depends_on targets in
+        # other phases won't be in `completed` and would spuriously gate the step.
+        # Phase steps are expected to be self-contained (see docs: `phase`).
+        if [[ -z "$phase_filter" ]]; then
+            local deps_met=true
+            local deps
+            deps=$(yq -r ".setup[$i].depends_on // [] | .[]" "$config_file" 2>/dev/null)
+
+            while read -r dep; do
+                [[ -z "$dep" ]] && continue
+                local found=false
+                for c in "${completed[@]}"; do
+                    if [[ "$c" == "$dep" ]]; then
+                        found=true
+                        break
+                    fi
+                done
+                if [[ "$found" == "false" ]]; then
+                    log_warn "Dependency not met for '$step_name': $dep"
+                    deps_met=false
                     break
                 fi
-            done
-            if [[ "$found" == "false" ]]; then
-                log_warn "Dependency not met for '$step_name': $dep"
-                deps_met=false
-                break
-            fi
-        done <<< "$deps"
+            done <<< "$deps"
 
-        if [[ "$deps_met" == "false" ]]; then
-            log_error "Skipping '$step_name' - dependencies not met"
-            skipped+=("$step_name")
-            continue
+            if [[ "$deps_met" == "false" ]]; then
+                log_error "Skipping '$step_name' - dependencies not met"
+                skipped+=("$step_name")
+                continue
+            fi
         fi
 
         # Check condition (restricted to test/file-check commands)
@@ -277,4 +293,116 @@ validate_setup_config() {
     done
 
     return $errors
+}
+
+# Read the declared required-artifact paths for a project.
+# These live under a top-level `setup_requires:` list (a sibling of the
+# `setup:` step list, which is a YAML sequence and therefore can't nest a
+# `.requires` key). Each entry is a path relative to the worktree root.
+# Emits one path per line; nothing when none are declared.
+get_setup_requires() {
+    local config_file="$1"
+    [[ -f "$config_file" ]] || return 0
+    yq -r '.setup_requires // [] | .[]' "$config_file" 2>/dev/null
+}
+
+# Verify a worktree contains every declared setup artifact.
+# Echoes each MISSING path (relative, one per line) to stdout and returns 1 if
+# any are missing; returns 0 when all present or none are declared. This catches
+# both aborted setup (the artifact-producing step never ran) and silent no-ops
+# (a step "succeeded" but didn't actually create the file).
+setup_requires_missing() {
+    local worktree_path="$1"
+    local config_file="$2"
+    local rel
+    local missing=0
+
+    while IFS= read -r rel; do
+        [[ -z "$rel" ]] && continue
+        if [[ ! -e "$worktree_path/$rel" ]]; then
+            echo "$rel"
+            missing=1
+        fi
+    done < <(get_setup_requires "$config_file")
+
+    return $missing
+}
+
+# Record a worktree's provisioning outcome and report whether it is incomplete.
+# A worktree is "ok" only when the setup steps succeeded (setup_rc == 0) AND
+# every declared setup_requires artifact is present; otherwise it is flagged
+# "incomplete" so `wt start` refuses to launch it and `wt repair` can fix it.
+# Missing artifacts are logged. Writes the `provisioned` state key.
+#
+# Usage: finalize_provisioning <project> <branch> <worktree_path> <config> <setup_rc>
+# Returns 0 when provisioned ok, 1 when incomplete.
+finalize_provisioning() {
+    local project="$1"
+    local branch="$2"
+    local worktree_path="$3"
+    local config_file="$4"
+    local setup_rc="${5:-0}"
+
+    local missing
+    missing=$(setup_requires_missing "$worktree_path" "$config_file")
+    local artifacts_ok=$?
+
+    if [[ "$setup_rc" -eq 0 ]] && [[ "$artifacts_ok" -eq 0 ]]; then
+        set_worktree_state "$project" "$branch" "provisioned" "ok"
+        return 0
+    fi
+
+    if [[ -n "$missing" ]]; then
+        log_error "Setup did not produce required files:"
+        local rel
+        while IFS= read -r rel; do
+            [[ -z "$rel" ]] && continue
+            log_error "  $rel"
+        done <<< "$missing"
+    fi
+
+    set_worktree_state "$project" "$branch" "provisioned" "incomplete"
+    return 1
+}
+
+# Preflight guard for `wt start`: refuse to launch a worktree whose setup never
+# completed. When the project declares setup_requires, the artifacts are the
+# source of truth — this also catches a file deleted after a clean provision.
+# Otherwise fall back to the recorded `provisioned` state key. An unset key
+# (worktrees from before this feature, or `--no-setup` with nothing declared)
+# is treated as OK so existing worktrees keep starting.
+#
+# Usage: assert_provisioned <project> <branch> <worktree_path> <config>
+# Returns 0 when OK to start; logs what's wrong and returns 1 when incomplete.
+assert_provisioned() {
+    local project="$1"
+    local branch="$2"
+    local worktree_path="$3"
+    local config_file="$4"
+
+    local requires
+    requires=$(get_setup_requires "$config_file")
+
+    if [[ -n "$requires" ]]; then
+        local missing
+        missing=$(setup_requires_missing "$worktree_path" "$config_file")
+        [[ -z "$missing" ]] && return 0
+        log_error "Worktree '$branch' is missing required setup files:"
+        local rel
+        while IFS= read -r rel; do
+            [[ -z "$rel" ]] && continue
+            log_error "  $rel"
+        done <<< "$missing"
+        return 1
+    fi
+
+    # No declared artifacts — consult the recorded provisioning status.
+    local provisioned
+    provisioned=$(get_worktree_state "$project" "$branch" "provisioned")
+    if [[ "$provisioned" == "incomplete" ]]; then
+        log_error "Worktree '$branch' was flagged as incompletely provisioned."
+        return 1
+    fi
+
+    return 0
 }
