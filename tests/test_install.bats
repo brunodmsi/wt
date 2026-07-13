@@ -91,3 +91,18 @@ _make_origin() {
     [ "$status" -eq 0 ]
     [ "$(git -C "$src" rev-parse HEAD)" = "$origin_head" ]
 }
+
+# make_executable chmods wt.sh, install.sh, lib/*.sh and commands/*.sh. If any
+# of those is committed 100644, the chmod +x dirties every checkout, which then
+# makes `wt update` refuse. Guard against reintroducing a non-executable script.
+@test "all shell scripts install.sh marks executable are committed 100755" {
+    command -v git >/dev/null || skip "git required"
+    local offenders
+    offenders="$(git -C "$WT_SCRIPT_DIR" ls-files -s wt.sh install.sh lib/ commands/ \
+        | awk '$4 ~ /\.sh$/ && $1 != "100755" {print $1, $4}')"
+    if [[ -n "$offenders" ]]; then
+        echo "Non-executable tracked scripts (should be 100755):" >&2
+        echo "$offenders" >&2
+        false
+    fi
+}
