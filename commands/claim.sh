@@ -97,13 +97,18 @@ cmd_claim() {
             export_port_vars "$branch" "$PROJECT_CONFIG_FILE" "$existing_slot" "$project"
             export_env_vars "$PROJECT_CONFIG_FILE"
 
+            local setup_rc=0
             if [[ "$no_setup" -eq 0 ]]; then
                 echo ""
-                execute_setup "$wt_path" "$PROJECT_CONFIG_FILE" || log_warn "Setup completed with errors"
+                execute_setup "$wt_path" "$PROJECT_CONFIG_FILE" || setup_rc=1
             else
                 log_info "Skipping setup (--no-setup)"
             fi
 
+            if ! finalize_provisioning "$project" "$branch" "$wt_path" "$PROJECT_CONFIG_FILE" "$setup_rc"; then
+                log_warn "Re-claimed '$branch' but setup is INCOMPLETE. Repair with:  ${WT_CMD} repair $branch"
+                return 2
+            fi
             log_success "Re-claimed worktree: $branch"
             return 0
         elif [[ "$force" -eq 0 ]]; then
@@ -163,37 +168,45 @@ cmd_claim() {
     _claim_cleanup_slot=""
     trap - INT TERM
 
-    # 10. Run setup steps (non-fatal summary, matches create). Do NOT open
-    # tmux / attach — Orca owns the terminal.
-    local setup_failed=0
+    # 10. Run setup steps. Do NOT open tmux / attach — Orca owns the terminal.
+    local setup_rc=0
     if [[ "$no_setup" -eq 0 ]]; then
         echo ""
-        if ! execute_setup "$wt_path" "$PROJECT_CONFIG_FILE"; then
-            log_warn "Setup completed with errors"
-            setup_failed=1
-        fi
+        execute_setup "$wt_path" "$PROJECT_CONFIG_FILE" || setup_rc=1
     else
         log_info "Skipping setup (--no-setup)"
     fi
 
+    # Record provisioning status: ok only when setup succeeded AND every declared
+    # setup_requires artifact is present. This is what stops a silently
+    # half-configured worktree from looking "claimed!" (Defect A).
+    local setup_failed=0
+    finalize_provisioning "$project" "$branch" "$wt_path" "$PROJECT_CONFIG_FILE" "$setup_rc" || setup_failed=1
+
     # 11. Run post_create hook if defined
     run_hook "$PROJECT_CONFIG_FILE" "post_create"
 
-    echo ""
-    if [[ "$setup_failed" -eq 1 ]]; then
-        log_warn "Worktree claimed but setup had errors. You may need to run setup manually."
-    else
-        log_success "Worktree claimed!"
-    fi
     echo ""
     print_kv "Branch" "$branch"
     print_kv "Path" "$wt_path"
     print_kv "Slot" "$slot"
     print_kv "Project" "$project"
     echo ""
+
+    # Fail loudly (non-zero exit) on an incomplete setup so a caller — an Orca
+    # hook, a script, or a human — can detect it. The worktree stays registered
+    # so `wt status` and `wt repair` can see it.
+    if [[ "$setup_failed" -eq 1 ]]; then
+        log_warn "Worktree claimed but setup is INCOMPLETE — services would start misconfigured."
+        echo "Repair with:"
+        echo "  ${WT_CMD} repair $branch     # re-run safe provisioning steps"
+        return 2
+    fi
+
+    log_success "Worktree claimed!"
     echo "Next steps:"
-    echo "  wt start $branch --all    # Start all services"
-    echo "  wt attach $branch         # Attach to tmux"
+    echo "  ${WT_CMD} start $branch --all    # Start all services"
+    echo "  ${WT_CMD} attach $branch         # Attach to tmux"
 }
 
 show_claim_help() {

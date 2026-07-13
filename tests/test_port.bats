@@ -100,6 +100,15 @@ teardown() {
     [[ "$port" == "3005" ]]
 }
 
+# Regression (Defect B): services_per_slot is a required 4th arg — no silent
+# fallback to a hardcoded constant. Callers that omit it (as the old reserved
+# table did) must fail loudly rather than over-report ports.
+@test "calculate_reserved_port fails when services_per_slot omitted" {
+    run calculate_reserved_port 1 0 3000
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"services_per_slot"* ]]
+}
+
 # --- slots_file / init_slots_file ---
 
 @test "slots_file returns correct path" {

@@ -102,6 +102,15 @@ cmd_start() {
         die "Could not find slot for worktree. State may be corrupted."
     fi
 
+    # Preflight: refuse to start a worktree whose setup never completed, so we
+    # never launch services against missing config (Defect A). Names the fix and
+    # starts nothing.
+    local wt_path
+    wt_path=$(get_worktree_path "$project" "$branch")
+    if ! assert_provisioned "$project" "$branch" "$wt_path" "$PROJECT_CONFIG_FILE"; then
+        die "Setup did not complete for '$branch'. Repair with:  ${WT_CMD} repair $branch"
+    fi
+
     # Export port and env variables
     export_port_vars "$branch" "$PROJECT_CONFIG_FILE" "$slot"
     export_env_vars "$PROJECT_CONFIG_FILE"
@@ -116,8 +125,6 @@ cmd_start() {
     _start_mux=$(detect_multiplexer)
     if [[ "$_start_mux" == "tmux" ]] || [[ "$_start_mux" == "dmux" ]]; then
         if ! session_exists "$session"; then
-            local wt_path
-            wt_path=$(get_worktree_path "$project" "$branch")
             create_session "$session" "$wt_path" "$PROJECT_CONFIG_FILE"
         fi
     fi

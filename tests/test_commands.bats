@@ -171,6 +171,28 @@ hooks:
     [[ "$output" == *"web"* ]] || [[ "$output" == *"3000"* ]]
 }
 
+# Regression (Defect B): the reserved-ports table must show the SAME port that
+# `wt start`/setup use. For a single-service project the table used a hardcoded
+# services_per_slot=2 and over-reported by one slot's worth — slot 1 printed
+# 3002 while everything real used 3001.
+@test "ports: reserved table matches effective env var (single-service slot 1 -> 3001)" {
+    _create_test_config "testproj"
+    load_project_config "testproj"
+    # Put this worktree on slot 1 (claim slot 0 for a filler branch first).
+    claim_slot "testproj" "filler" 3
+    claim_slot "testproj" "feature/s1" 3
+    create_worktree_state "testproj" "feature/s1" "$TEST_REPO" 1
+
+    run cmd_ports -p "testproj" "feature/s1" 2>&1
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *"Reserved Ports (Slot 1)"* ]]
+    # Reserved-table row and the effective env var agree on 3001...
+    [[ "$output" == *"export PORT_WEB=3001"* ]]
+    [[ "$output" == *"web"*"3001"* ]]
+    # ...and the old buggy 3002 appears nowhere.
+    [[ "$output" != *"3002"* ]]
+}
+
 @test "ports: set subcommand creates override" {
     _create_test_config "testproj"
     load_project_config "testproj"
@@ -226,6 +248,25 @@ hooks:
     run cmd_start --help
     [[ "$status" -eq 0 ]]
     [[ "$output" == *"start"* ]] || [[ "$output" == *"Start"* ]]
+}
+
+# Preflight (Defect A): a worktree flagged provisioned=incomplete must not start.
+@test "start: refuses an incompletely-provisioned worktree and starts nothing" {
+    _create_test_config "testproj"
+    load_project_config "testproj"
+
+    local wt_path
+    wt_path=$(create_worktree "feature/broken-start" "" "$TEST_REPO" 2>/dev/null)
+    local slot
+    slot=$(claim_slot "testproj" "feature/broken-start" 3)
+    create_worktree_state "testproj" "feature/broken-start" "$wt_path" "$slot"
+    set_worktree_state "testproj" "feature/broken-start" "provisioned" "incomplete"
+
+    run cmd_start -p testproj "feature/broken-start" --all 2>&1
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"repair"* ]]
+    # No service was launched
+    [[ "$(get_service_state "testproj" "feature/broken-start" "web" "status")" != "running" ]]
 }
 
 # ===== stop command =====

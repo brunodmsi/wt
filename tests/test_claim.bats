@@ -251,6 +251,112 @@ _make_external_worktree() {
     [[ "$output" == *"does not exist"* ]]
 }
 
+# ===== claim: setup integrity (Defect A) =====
+
+# Config whose setup aborts before its artifact-producing step, and which
+# declares that artifact as required. Mirrors the incident: an early abort means
+# the .env-writing step never runs, yet the worktree used to report "claimed!".
+_create_aborting_config() {
+    create_yaml_fixture "$WT_PROJECTS_DIR/test-repo.yaml" "name: test-repo
+repo_path: $TEST_REPO
+ports:
+  reserved:
+    range: { min: 3000, max: 3010 }
+    slots: 3
+    services:
+      web: 0
+  dynamic:
+    range: { min: 4000, max: 5000 }
+    services: {}
+setup:
+  - name: will-abort
+    command: exit 1
+    working_dir: .
+    on_failure: abort
+  - name: write-env
+    command: touch .env
+    working_dir: .
+setup_requires:
+  - .env"
+}
+
+@test "claim: fails loudly and flags incomplete when setup aborts" {
+    _create_aborting_config
+    local ext
+    ext=$(_make_external_worktree "feature/broken")
+
+    run cmd_claim "$ext" -p test-repo 2>&1
+    # Non-zero exit — a caller (Orca hook / script / human) can detect failure
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"INCOMPLETE"* ]]
+    [[ "$output" == *"repair"* ]]
+    # State records the failure, and the worktree stays registered
+    [[ "$(get_worktree_state "test-repo" "feature/broken" "provisioned")" == "incomplete" ]]
+    worktree_state_exists "test-repo" "feature/broken"
+    # The abort meant the required artifact never got created
+    [[ ! -f "$ext/.env" ]]
+}
+
+# All steps succeed but a declared required artifact is still absent — the
+# artifact gate must catch this too (mirrors the §2.3 silent-no-op class).
+_create_requires_gate_config() {
+    create_yaml_fixture "$WT_PROJECTS_DIR/test-repo.yaml" "name: test-repo
+repo_path: $TEST_REPO
+ports:
+  reserved:
+    range: { min: 3000, max: 3010 }
+    slots: 3
+    services:
+      web: 0
+  dynamic:
+    range: { min: 4000, max: 5000 }
+    services: {}
+setup:
+  - name: noop
+    command: echo ok
+    working_dir: .
+setup_requires:
+  - gap-app-v2/.env"
+}
+
+@test "claim: required-artifact gate flags incomplete even when every step passes" {
+    _create_requires_gate_config
+    local ext
+    ext=$(_make_external_worktree "feature/gate")
+
+    run cmd_claim "$ext" -p test-repo 2>&1
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"gap-app-v2/.env"* ]]
+    [[ "$(get_worktree_state "test-repo" "feature/gate" "provisioned")" == "incomplete" ]]
+}
+
+@test "claim: marks provisioned=ok when setup completes and artifacts present" {
+    create_yaml_fixture "$WT_PROJECTS_DIR/test-repo.yaml" "name: test-repo
+repo_path: $TEST_REPO
+ports:
+  reserved:
+    range: { min: 3000, max: 3010 }
+    slots: 3
+    services:
+      web: 0
+  dynamic:
+    range: { min: 4000, max: 5000 }
+    services: {}
+setup:
+  - name: write-env
+    command: touch app.env
+    working_dir: .
+setup_requires:
+  - app.env"
+    local ext
+    ext=$(_make_external_worktree "feature/ok")
+
+    run cmd_claim "$ext" -p test-repo 2>&1
+    [[ "$status" -eq 0 ]]
+    [[ "$(get_worktree_state "test-repo" "feature/ok" "provisioned")" == "ok" ]]
+    [[ -f "$ext/app.env" ]]
+}
+
 # ===== claim: downstream commands work on a claimed worktree =====
 # Regression for the worktree_exists() computed-path gate that previously made
 # status/exec/run/start/restart die on claimed worktrees.

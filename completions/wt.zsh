@@ -10,6 +10,10 @@ _wt() {
     commands=(
         'create:Create a new worktree'
         'new:Create a new worktree (alias)'
+        'claim:Adopt an externally-created worktree'
+        'repair:Re-run safe provisioning steps for a worktree'
+        'release:Drop a claimed worktree (keeps the directory)'
+        'unclaim:Drop a claimed worktree (alias)'
         'delete:Delete a worktree'
         'rm:Delete a worktree (alias)'
         'list:List all worktrees'
@@ -137,6 +141,13 @@ _wt() {
                         '(-h --help)'{-h,--help}'[Show help]' \
                         '1:worktree:_wt_worktrees' \
                         '2:step:'
+                    ;;
+                repair)
+                    _arguments \
+                        '--branch[Override branch detection]:branch:_wt_worktrees' \
+                        '(-p --project)'{-p,--project}'[Project name]:project:_wt_projects' \
+                        '(-h --help)'{-h,--help}'[Show help]' \
+                        '1:worktree:_wt_worktrees'
                     ;;
                 exec)
                     _arguments \

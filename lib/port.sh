@@ -29,14 +29,23 @@ calculate_dynamic_port() {
 }
 
 # Calculate reserved port from slot
-# Slot 0: 3000, 3001
-# Slot 1: 3002, 3003
-# Slot 2: 3004, 3005
+# port = base + (slot * services_per_slot) + service_offset
+#
+# services_per_slot is REQUIRED — callers must derive it from the config the
+# same way calculate_worktree_ports does (max service offset + 1). There is no
+# default: a hardcoded fallback (previously 2) silently over-reports ports for
+# single-service projects (the `wt ports` reserved-table bug), so an omitted
+# 4th arg is a caller error rather than a guess.
 calculate_reserved_port() {
     local slot="$1"
     local service_offset="$2"
     local base="${3:-3000}"
-    local services_per_slot="${4:-2}"
+    local services_per_slot="$4"
+
+    if [[ -z "$services_per_slot" ]]; then
+        log_error "calculate_reserved_port: services_per_slot (4th arg) is required"
+        return 1
+    fi
 
     local port=$((base + (slot * services_per_slot) + service_offset))
     if (( port < 1 || port > 65535 )); then

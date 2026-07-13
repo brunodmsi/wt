@@ -5,7 +5,7 @@ _wt_completions() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="create new delete rm list ls start up stop down status st attach a run exec init config ports send s logs log panes doctor doc help version"
+    local commands="create new claim repair release unclaim delete rm list ls start up stop down status st attach a run exec init config ports send s logs log panes doctor doc help version"
 
     # Get current word and previous word
     cur="${COMP_WORDS[COMP_CWORD]}"
@@ -133,6 +133,14 @@ _wt_completions() {
         run)
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=($(compgen -W "-p --project -h --help" -- "$cur"))
+            else
+                local worktrees=$(git worktree list --porcelain 2>/dev/null | grep "^branch" | sed 's|branch refs/heads/||')
+                COMPREPLY=($(compgen -W "$worktrees" -- "$cur"))
+            fi
+            ;;
+        repair)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--branch -p --project -h --help" -- "$cur"))
             else
                 local worktrees=$(git worktree list --porcelain 2>/dev/null | grep "^branch" | sed 's|branch refs/heads/||')
                 COMPREPLY=($(compgen -W "$worktrees" -- "$cur"))
